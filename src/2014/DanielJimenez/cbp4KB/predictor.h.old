@@ -1,0 +1,1101 @@
+#ifndef _PREDICTOR_H_
+#define _PREDICTOR_H_
+
+#include <assert.h>
+#include <inttypes.h>
+#include <math.h>
+#include "utils.h"
+#include "tracer.h"
+#include <math.h>
+#include <string.h>
+
+
+// search for "class sampler_info" to see my predictor code. preceding it is
+// some stuff from my infrastructure as well as Andre's loop predictor code.
+
+struct binfo {
+        unsigned int address, opcode, br_flags;
+};
+#define BR_CONDITIONAL 1
+
+// this class contains information that is kept between prediction and update
+// this is mostly cruft left over from my own simulation infrastructure
+
+class branch_info {
+	bool _prediction;
+public:
+
+	branch_info (void) { }
+
+	void prediction (bool p) {
+		_prediction = p;
+	}
+
+	bool prediction (void) {
+		return _prediction;
+	}
+};
+
+class branch_predictor {
+public:
+	branch_predictor (void) { }
+	virtual branch_info *lookup (unsigned int pc, bool evertaken, bool evernottaken) = 0;
+	virtual void update (branch_info *p, bool taken) = 0;
+	virtual void info (unsigned int pc, unsigned int optype) { }
+};
+
+// this loop predictor is shamelessy ripped off and adapted from from Andre Seznec's CBP2 code
+
+#define WIDTHNBITERLOOP 14
+
+typedef uint32_t address_t;
+
+class loop_info : public branch_info {
+public:
+
+	// this is a pointer to the update object for the base predictor
+
+	branch_info *smu;
+
+	// no real constructor
+
+	loop_info (void) : branch_info () { }
+};
+
+// main loop predictor class
+
+class loop : public branch_predictor {
+public:
+	loop_info u;
+	binfo bi;
+	branch_predictor *bp;
+
+	// inner class giving a loop predictor entry
+	class lentry {
+	public:
+		uint16_t NbIter;		//14 bits
+		uint8_t confid;		// 2 bits
+		uint16_t CurrentIter;	// 14 bits
+		uint16_t TAG;		// 14 bits
+		uint8_t age;		//8 bits
+
+	    	// 52 bits per entry    
+		lentry (void) {
+			confid = 0;
+			CurrentIter = 0;
+			NbIter = 0;
+			TAG = 0;
+			age = 0;
+		}
+	};
+
+	lentry *ltable;		//loop predictor table
+	int Seed;		// for the pseudo-random number generator
+	bool pred_taken;	// prediction
+	bool bp_pred;		// base predictor prediction
+	bool predloop;		// loop predictor prediction
+	int LI;			//index of the loop predictor
+	int logl;
+	int LHIT;		//hitting way in the loop predictor
+	int LTAG;		//tag on the loop predictor
+	bool LVALID;		// validity of the loop predictor prediction
+	int8_t WITHLOOP;	// counter to monitor whether or not loop prediction is beneficial
+
+	// constructor
+
+	loop (branch_predictor *BP, int _logl = 8) {
+		logl = _logl;
+		Seed = 0;
+		bp = BP;
+
+		// allocation of the loop predictor table
+
+		ltable = new lentry[1 << logl];
+	}
+
+	// index function for the 4-way associative loop predictor
+
+	int lindex (address_t pc) {
+		return ((pc & ((1 << (logl - 2)) - 1)) << 2);
+	}
+
+	// up-down saturating counter
+
+	void ctrupdate (int8_t & ctr, bool taken, int nbits) {
+		if (taken) {
+			if (ctr < ((1 << (nbits - 1)) - 1)) ctr++;
+		} else {
+			if (ctr > -(1 << (nbits - 1))) ctr--;
+		}
+	}
+
+	// loop prediction: only used if high confidence
+	bool getloop (address_t pc) {
+		LHIT = -1;
+		LI = lindex (pc);
+		LTAG = (pc >> (logl - 2)) & ((1 << 14) - 1);
+		for (int i = 0; i < 4; i++) if (ltable[LI + i].TAG == LTAG) {
+			LHIT = i;
+			LVALID = (ltable[LI + i].confid == 3);
+			if (ltable[LI + i].CurrentIter + 1 == ltable[LI + i].NbIter)
+				return false;
+			else
+				return true;
+		}
+		LVALID = false;
+		return (false);
+	}
+
+	void loopupdate (address_t pc, bool Taken) {
+		if (LHIT >= 0) {
+			// already a hit 
+			if (LVALID) {
+				if (Taken != predloop) {
+					// free the entry
+					ltable[LI + LHIT].NbIter = 0;
+					ltable[LI + LHIT].age = 0;
+					ltable[LI + LHIT].confid = 0;
+					ltable[LI + LHIT].CurrentIter = 0;
+					return;
+				} else 
+					if (predloop != bp_pred) 
+						if (ltable[LI + LHIT].age < 255) 
+							ltable[LI + LHIT].age++;
+			}
+			ltable[LI + LHIT].CurrentIter++;
+			ltable[LI + LHIT].CurrentIter &= ((1 << WIDTHNBITERLOOP) - 1);
+			//loop with more than 2**14 iterations are not treated correctly; but who cares :-)
+			if (ltable[LI + LHIT].CurrentIter > ltable[LI + LHIT].NbIter) {
+				ltable[LI + LHIT].confid = 0;
+				if (ltable[LI + LHIT].NbIter != 0) {
+					// free the entry
+					ltable[LI + LHIT].NbIter = 0;
+					ltable[LI + LHIT].age = 0;
+					ltable[LI + LHIT].confid = 0;
+				}
+			}
+			if (Taken != true) {
+				if (ltable[LI + LHIT].CurrentIter == ltable[LI + LHIT].NbIter) {
+					if (ltable[LI + LHIT].confid < 3)
+						ltable[LI + LHIT].confid++;
+					//just do not predict when the loop count is 1 or 2     
+					if (ltable[LI + LHIT].NbIter < 3) { 
+						// free the entry
+						ltable[LI + LHIT].NbIter = 0;
+						ltable[LI + LHIT].age = 0;
+						ltable[LI + LHIT].confid = 0;
+					}
+				} else {
+					if (ltable[LI + LHIT].NbIter == 0) {
+						// first complete nest;
+						ltable[LI + LHIT].confid = 0;
+						ltable[LI + LHIT].NbIter =
+						ltable[LI + LHIT].CurrentIter;
+					} else {
+						// not the same number of iterations as last time: free the entry
+						ltable[LI + LHIT].NbIter = 0;
+						ltable[LI + LHIT].age = 0;
+						ltable[LI + LHIT].confid = 0;
+					}
+				}
+				ltable[LI + LHIT].CurrentIter = 0;
+			}
+		} else if (Taken) {
+			//try to allocate an entry on taken branch
+			for (int i = 0; i < 4; i++) {
+				int LHIT = (Seed + i) & 3;
+				if (ltable[LI + LHIT].age == 0) {
+					ltable[LI + LHIT].TAG = LTAG;
+					ltable[LI + LHIT].NbIter = 0;
+					ltable[LI + LHIT].age = 255;
+					ltable[LI + LHIT].confid = 0;
+					ltable[LI + LHIT].CurrentIter = 1;
+					break;
+				} else
+					ltable[LI + LHIT].age--;
+			}
+		}
+	}
+
+	// PREDICTION
+
+	branch_info *lookup (unsigned int add, bool et, bool ent) {
+		binfo b;
+		b.address = add;
+		b.opcode = 0;
+		b.br_flags = BR_CONDITIONAL;
+		bi = b;
+		int pc = b.address;
+		if (b.br_flags & BR_CONDITIONAL) {
+			predloop = getloop (pc);	// loop prediction
+			u.smu = bp->lookup (pc, et, ent);
+			bp_pred = u.smu->prediction ();
+			pred_taken = ((WITHLOOP >= 0) && (LVALID)) ? predloop : bp_pred;
+		}
+		u.prediction (pred_taken);
+		return &u;
+	}
+
+	// PREDICTOR UPDATE
+
+	void update (branch_info * u, bool taken) {
+		Seed++;
+		address_t pc = bi.address;
+		if (bi.br_flags & BR_CONDITIONAL) {
+			loop_info *su = (loop_info *) u;
+			bp->update (su->smu, taken);
+			// first update the loop predictor
+			loopupdate (pc, taken);
+			if (LVALID) if (bp_pred != predloop)
+				ctrupdate (WITHLOOP, (predloop == taken), 7);
+		}
+	}
+
+	// send the extra information along to the base predictor
+
+	void info (unsigned int pc, unsigned int optype) {
+		bp->info (pc, optype);
+	}
+};
+
+// history sampling hashed perceptron predictor
+
+#include <math.h>
+
+typedef char byte;
+
+// this class holds information learned or computed in the prediction phase
+// that we would like to remember for the update phase. it does not count
+// against the hardware budget because it can be recomputed; it is a programming 
+// convenience rather than a necessity.
+
+class sampler_info : public branch_info {
+public:
+
+	// the perceptron output for this prediction
+
+	float
+		sum, 
+		weighted_sum; 
+
+	// the pc of the branch being predicted
+
+	unsigned int 
+		pc;
+
+	// table indices
+
+	unsigned int 
+		*indices, 
+		local_index;
+
+	sampler_info (void) { }
+};
+
+class sampler : public branch_predictor {
+private:
+
+	// information about this prediction to keep until the update
+
+	sampler_info p;
+
+	// variables for managmenent of custom memory allocator
+
+	unsigned char 
+		*my_heap, 
+		*bump_pointer, 
+		*heap_end;
+
+	// RUNTIME CONSTANTS that are parameters to the constructor
+
+	const int 
+		local_shift,			// how far left to shift local history before XORing
+		bytes,				// total number of bytes allowed to predictor 
+		max_exp, 			// maximum value in coeffs array 
+		bits, 				// bit width of weights 
+		num_tables,			// number of tables 
+		nsamples,			// number of samples 
+		folding,			// number of bits in output of history folding function 
+		filter_size,			// size of never/always taken branch filter 
+		path_bit,			// which bit of PC should be recorded in path history 
+		speed, 				// speed for adaptive threshold fitting 
+		local_table_size,		// size of the table for the local history predictor 
+		local_history_length,		// history length for the local predictor 
+		local_num_histories;		// number of local histories to keep 
+
+	// RUNTIME CONSTANTS that are computed in the constructor based on parameters
+
+	int
+		table_size,			// size of each perceptron table (1097 for 32KB version, 283 for 4KB version)
+		max_weight, 			// maximum weight value 
+		min_weight, 			// minimum weight value 
+		history_length, 		// maximum history length in the samples 
+		history_size;			// number of 64-bit history elements 
+
+	const unsigned int 
+		mask;				// tells us which non-conditional-branch PCs should be incorporated into the global and/or path history
+
+	const int 
+		*samples;			// the samples (see paper)
+
+	const double
+		theta_fuzz,			// describes a neighborhood around theta where a correct prediction may probabilistically lead to an update
+		coeff_local, 			// multiply the local weight times this before adding it to the sum 
+		coeff_train, 			// multiply the perceptron output by this before deciding whether to train 
+		coeff_base;			// we add to the weighted sum coeff_base to a coefficient power times the weight 
+
+	const bool
+		static_prediction,		// what to predict when we don't know what to predict
+		primey;				// if true, decrease table sizes to the nearest prime number for better hashing :-)
+
+
+	// PREDICTOR STATE that counts against the hardware budget
+
+	unsigned int
+		my_seed;			// seed for a random number generator
+
+	int
+		psel,				// choose between sum and weighted sum for prediction
+		tc, 				// threshold counter for adaptive threshold fitting 
+		theta; 				// threshold for perceptron learning
+
+	unsigned long long int
+		*global_history,		// array of history_size 64-bit unsigned integers keeping the global pattern history
+		*path_history;			// array of history_size 64-bit unsigned integers keeping the global path history
+
+	unsigned long long int
+		callstack_history;		// a single 64-bit unsigned integer keeping a 1-bit wide 64-deep callstack (actually no more than 5 bits are ever used)
+
+	bool *filter[2];			// array of two filter_size vectors of bits used to remember whether a branch has non-trivial behavior
+
+	byte **table;				// perceptron weights tables: a num_tables x table_size array of small signed integers
+
+	byte *local_pht;			// local pattern history table: an array of local_table_size small signed integers
+
+	unsigned int
+		*local_histories;		// local histories: an array of local_num_histories bit vectors (i.e. unsigned integers) of local_history_length bit each
+
+	int *coeffs;				// the logs base coeff_base of numbers multiplied by weights to get the weighted sum
+
+
+	// METHODS
+
+	// index an array of unsigned long long ints holding path/pattern/callstack history
+
+	bool index_history (unsigned long long int *v, unsigned int index) {
+		unsigned int word_index = index / (sizeof (unsigned long long int) * 8);
+		if (word_index >= (unsigned int) history_size) return false; // too far
+		unsigned int word_offset = index % (sizeof (unsigned long long int) * 8);
+		return (v[word_index] >> word_offset) & 1;
+	}
+
+	// fold a history of 'on' bits into 'cn' bits, skipping 'st'
+	// bits. inspired by Seznec's history folding function
+
+	unsigned int fold_history (unsigned long long int *v, int start, int on, int cn, int st) {
+		unsigned int r = 0;
+
+		// first part: go up to the highest multiple of 'cn' less than 'on'
+
+		int lim = (on / cn) * cn;
+		int i;
+		unsigned int q;
+		for (i=0; i<lim; i+=cn) {
+			q = 0;
+			for (int j=i; j<i+cn; j+=st) {
+				q <<= 1;
+				q |= index_history (v, start+j);
+			}
+			r ^= q;
+		}
+
+		// second part: peel off last iteration and check we don't go over 'on'
+
+		q = 0;
+		for (int j=i; j<on; j++) {
+			q <<= 1;
+			q |= index_history (v, start+j);
+		}
+		r ^= q;
+		return r & ((1<<cn)-1);
+	}
+
+	// hash functions by Thomas Wang, best live link is http://burtleburtle.net/bob/hash/integer.html
+
+	unsigned int hash1 (unsigned int a) {
+		a = (a ^ 0xdeadbeef) + (a<<4);
+		a = a ^ (a>>10);
+		a = a + (a<<7);
+		a = a ^ (a>>13);
+		return a;
+	}
+
+        unsigned int hash2 (unsigned int key) {
+                int c2=0x27d4eb2d; // a prime or an odd constant
+                key = (key ^ 61) ^ (key >> 16);
+                key = key + (key << 3);
+                key = key ^ (key >> 4);
+                key = key * c2;
+                key = key ^ (key >> 15);
+                return key;
+        }
+
+	// hash a key with the i'th hash function using the common Bloom filter trick
+	// of linearly combining two hash functions with i as the slope
+
+	unsigned int hash (unsigned int key, unsigned int i) {
+		return hash2 (key) * i + hash1 (key);
+	}
+
+	// custom memory allocator
+
+	unsigned char *my_malloc (int size) {
+		unsigned char *r = bump_pointer;
+		while (size & 3) size++; // 8-byte align
+		bump_pointer += size;
+		if (bump_pointer >= heap_end) assert (0);
+		return r;
+	}
+
+	// returns true if x is prime
+
+	bool prime (unsigned int x) {
+		for (int i=2; i<=(int)x/2; i++) if ((x % i) == 0) return false;
+		return true;
+	}
+
+public:
+
+	// constructor
+
+	sampler (
+		// parameters 
+		int *_samples = NULL, 			// rows of samples
+		int _nsamples = 45, 			// number of rows of samples
+		int _bytes = 4096+1024/8, 		// hardware budget in bytes
+		int _bits = 6, 				// bit width of a weight
+		int _num_tables = 16, 			// number of perceptron weights tables
+		int _folding = 24, 			// width of hash function domain
+		int _filter_size = 1216, 		// number of entries in filter
+		int _theta = 16, 			// initial value of threshold
+		int _path_bit = 6, 			// which bit of the PC to use for global path history
+		int _speed = 7, 			// speed for dynamic threshold fitting
+		double _coeff_local = 1.14,	 	// coefficient for local predictor weight
+		int _local_table_size = 512, 		// size of local predictor pattern history table
+		int _local_history_length = 5, 		// history length for local predictor
+		int _local_num_histories = 64,		// number of local histories to keep
+		double _theta_fuzz = 2.7, 		// neighborhood around theta to probabilistically train on correct prediction
+		double _coeff_train = 1.004, 		// fudge factor for sum to decide whether training is needed
+		double _coeff_base = 1.0000258,		// coefficients for weights learned at run-time are this raised to coeffs[i] power
+		int _max_exp = 131072,	 		// maximum value for coeffs[i] 
+		bool _primey = true,			// if true, decrease table sizes to nearest prime number
+		unsigned int _mask = 0x40000018,	// used to determine which bits of non-conditional branch PCs to shift into which histories
+		bool _static_prediction = false,
+		int _local_shift = 5) :
+
+		// initialize 
+
+		branch_predictor () ,
+		local_shift(_local_shift),
+		bytes(_bytes),
+		max_exp(_max_exp),
+		bits(_bits),
+		num_tables(_num_tables),
+		nsamples(_nsamples),
+		folding(_folding),
+		filter_size(_filter_size),
+		path_bit(_path_bit),
+		speed(_speed),
+		local_table_size(_local_table_size),
+		local_history_length(_local_history_length),
+		local_num_histories(_local_num_histories),
+		mask(_mask),
+		theta_fuzz(_theta_fuzz),
+		coeff_local(_coeff_local),
+		coeff_train(_coeff_train),
+		coeff_base(_coeff_base),
+		static_prediction(_static_prediction),
+		primey(_primey) 
+		{
+
+		// set up custom memory allocator
+
+#define N 1000000
+//#define VERBOSE
+		my_heap = new unsigned char[N];
+		memset (my_heap, 0, N);
+		heap_end = &my_heap[N];
+		bump_pointer = my_heap;
+
+		// we have this many total bits to work with
+
+		int total_bits = bytes * 8;
+
+		// global and local indices kept in the sampler_info struct
+
+		total_bits -= 11 * num_tables + 11;
+
+		// sum and weighted sum are two 32-bit floats
+
+		total_bits -= 32 * 2;
+
+		// initialize random number generator and account for its 32 bits of state
+
+		my_seed = 0xd00ba1;
+		total_bits -= sizeof (unsigned int) * 8;
+
+		// initialize call stack history and account for its 64 bits of state
+
+		callstack_history = 0;
+		// total_bits -= sizeof (unsigned long long int) * 8;
+
+		// it turns out none of the samples uses more than 5 bits of callstack history
+
+		total_bits -= 5;
+
+		// initialize weighted versus non-weighted selector and account for its 10 bit width
+
+		psel = 0;
+		total_bits -= 10;
+
+		// coefficients are 18 bits each
+
+		total_bits -= 18 * num_tables;
+		coeffs = (int *) my_malloc (sizeof (int) * num_tables);
+		for (int i=0; i<num_tables; i++) coeffs[i] = 0;
+
+		// set up and account for local predictor
+
+		if (local_table_size) {
+			local_pht = (byte *) my_malloc (local_table_size);
+			local_histories = (unsigned int *) my_malloc (local_num_histories * sizeof (unsigned int));
+			total_bits -= local_table_size * bits;
+			total_bits -= local_num_histories * local_history_length;
+		} else {
+			local_pht = NULL;
+			local_histories = NULL;
+		}
+
+		// we should receive some array in the parameter list
+
+		assert (_samples);
+
+		// figure out the history length as the maximum indexed history position in any sample
+
+		history_length = 0;
+		int j = 0;
+		for (int i=0; i<nsamples; i++) {
+			if (_samples[j+1] > history_length) history_length = _samples[j+1];
+			j+=5;
+		}
+		samples = _samples;
+
+#ifdef VERBOSE
+		// this will print out 752 for the 32KB version, 120 for the 4KB version
+		printf ("history length is %d\n", history_length);
+#endif
+
+		// account for the history lengths
+
+		total_bits -= history_length * 2;
+
+		// increase the history length by a safe amount for sizing history arrays
+		// so we will allocate the right number of unsigned long long ints
+
+		while (history_length & 7) history_length++;
+		history_length += folding;
+		history_size = (history_length / (8 * sizeof (unsigned long long int))) + 1;
+
+
+		// get an array to remember the indices from this iteration to the next
+		// does not count against h/w budget because we can recompute it (anyway, 
+		// if you want to count it it's at most 10 x 32 = 320 bits
+
+		p.indices = (unsigned int *) my_malloc (num_tables * sizeof (unsigned int));
+
+		// compute maximum and minimum weights
+
+		max_weight = (1<<bits)/2-1;
+		min_weight = -(1<<bits)/2;
+
+		// initialize and accont for adaptive threshold fitting counter (it is never more than 8 bits)
+
+		tc = 0;
+		total_bits -= 8;
+
+		// initialize and account for theta (it is never more than 9 bits)
+
+		total_bits -= 9;
+		theta = _theta;
+
+		// global history 
+
+		global_history = (unsigned long long int *) my_malloc (sizeof (unsigned long long int) * (history_size+1));
+
+		// path history
+
+		path_history = (unsigned long long int *) my_malloc (sizeof (unsigned long long int) * (history_size+1));
+
+		// filter
+
+		if (filter_size) {
+			for (int i=0; i<2; i++) {
+				total_bits -= filter_size;
+				filter[i] = (bool *) my_malloc (filter_size);
+			}
+		}
+
+		table_size = (total_bits / bits) / num_tables;
+
+		if (primey) while (!prime(table_size)) table_size--;
+#ifdef VERBOSE
+		// this will print 1097 for the 32KB version, 283 for the 4KB version
+		printf ("table size is %d\n", table_size);
+#endif
+
+		// perceptron weights tables
+
+		table = (byte **) my_malloc (num_tables * sizeof (byte *));
+		for (int i=0; i<num_tables; i++) {
+			table[i] = (byte *) my_malloc (table_size);
+			memset (table[i], 0, table_size);
+			total_bits -= bits * table_size;
+		}
+#ifdef VERBOSE
+		printf ("ended up with %d bits left over.\n", total_bits);
+#endif
+		assert (total_bits >= 0);
+	}
+
+	// destructor
+
+	~sampler (void) {
+		delete[] my_heap;
+	}
+
+	// shift a history bit into the history array
+
+	void shift_history (unsigned long long int *v, bool t) {
+		for (int i=0; i<=history_size; i++) {
+			bool nextt = !!(v[i] & (1ull<<63));
+			v[i] <<= 1;
+			v[i] |= t;
+			t = nextt;
+		}
+	}
+
+	// saturating increment/decrement
+
+	byte satincdec (byte weight, bool taken, int max, int min) {
+		if (taken) {
+			return (weight < max) ? weight + 1 : weight;
+		} else {
+			return (weight > min) ? weight - 1 : weight;
+		}
+	}
+
+	// dynamic threshold updating per Seznec
+
+	void threshold_setting (sampler_info *u, bool correct, int a) {
+		if (!correct) {
+			tc++;
+			if (tc >= speed) {
+				theta++;
+				tc = 0;
+			}
+		}
+		if (correct && a < theta) {
+			tc--;
+			if (tc <= -speed) {
+				theta--;
+				tc = 0;
+			}
+		}
+	}
+
+	// return a local history for this pc
+
+	unsigned int get_local_history (unsigned int pc) {
+		unsigned int l = local_histories[hash(pc,0) % local_num_histories];
+		l &= (1<<local_history_length)-1;
+		l <<= local_shift;
+		return (l ^ pc) % local_table_size;
+	}
+
+	void compute_sums (unsigned int pc, sampler_info *u) {
+		// initialize indices
+
+		for (int i=0; i<num_tables; i++) u->indices[i] = 0;
+
+		// initialize index into samples
+
+		int j = 0;
+
+		// for each sample, accumulate a partial index
+
+		unsigned int index = 0, partial_index = 0;
+		unsigned long long int *histories[3];
+		histories[0] = global_history;
+		histories[1] = path_history;
+		histories[2] = &callstack_history;
+		int this_table = 0;
+		for (int i=0; i<nsamples; i++) {
+			unsigned int start = samples[j++];
+			unsigned int end = samples[j++];
+			unsigned int kind = samples[j++] % 3;
+			unsigned int which = samples[j++] % num_tables;
+			unsigned int stride = samples[j++] + 1;
+			assert (which >= 0);
+			assert (which < (unsigned int) num_tables);
+			partial_index = hash (pc, which);
+			partial_index ^= fold_history (histories[kind], start, end-start, folding, stride);
+			if (which != (unsigned int) this_table) {
+				index %= table_size;
+				int x = table[this_table][index];
+				u->sum += x;
+				u->weighted_sum += pow (coeff_base, coeffs[this_table]) * x;
+				u->indices[this_table] = index;
+
+				// get ready for the next index
+
+				index = 0;
+				this_table++;
+			}
+			if (which < (unsigned int) this_table) {
+				printf ("forgot to sort samples!\n");
+				assert (0);
+			}
+			index <<= 1;
+			index += partial_index;
+		}
+		assert (this_table < num_tables);
+		index %= table_size;
+		int x = table[this_table][index];
+		u->sum += x;
+		u->weighted_sum += pow (coeff_base, coeffs[this_table]) * x;
+		u->indices[this_table] = index;
+
+		// now we have all the indices. use them to compute
+		// the weighted and unweighted sums
+
+		// add in the local prediction
+
+		if (local_table_size) {
+			u->local_index = get_local_history (pc);
+			int x = local_pht[u->local_index];
+			u->sum += (int) (coeff_local * x);
+			u->weighted_sum += (int) (coeff_local * x);
+		}
+	}
+
+	// look up a prediction in the predictor
+
+	branch_info *lookup (unsigned int pc, bool, bool) { 
+		sampler_info *u = &p;
+		u->pc = pc;
+
+		// initialize two sums
+
+		u->sum = 0.0;
+		u->weighted_sum = 0.0;
+
+		// an index into the filter
+
+		unsigned int idx;
+		bool new_branch = false;
+		if (filter_size) {
+			idx = hash (u->pc, 0) % filter_size;
+
+			// remember whether this is the first time we are seeing this branch
+
+			new_branch = !(filter[0][idx] || filter[1][idx]);
+		}
+
+		// if the branch is in exactly one filter...
+
+		if (filter_size && (filter[0][idx] != filter[1][idx])) {
+
+			// ...predict the branch will do what its been observed doing before
+
+			if (filter[0][idx]) {
+				u->prediction (false);
+				u->weighted_sum = min_weight;
+				u->sum = min_weight;
+			} else if (filter[1][idx]) {
+				u->prediction (true);
+				u->weighted_sum = max_weight;
+				u->sum = max_weight;
+			}
+		} else {
+			// it's in both filters; have to predict it with
+			// perceptron predictor
+			compute_sums (pc, u);
+		}
+		if (new_branch) {
+			// if this is a new branch, predict it statically
+
+			u->prediction (static_prediction);
+		} else {
+			// give the prediction with the kind of sum that seems do
+			// be doing well
+			bool prediction;
+
+			if (psel >= 0) 
+				prediction = u->weighted_sum >= 0.0;
+			else
+				prediction = u->sum >= 0.0;
+			u->prediction (prediction);
+		}
+		return u;
+	}
+
+	// update an executed branch
+
+	void update (branch_info *hu, bool taken) {
+		sampler_info *u = (sampler_info *) hu;
+		bool 
+			never_taken = false, 
+			never_untaken = false;
+
+		// an index into the filters
+
+		unsigned int idx = 0;
+
+		// we don't know that we need to update yet
+
+		bool need_to_update = false;
+		if (filter_size) {
+
+			// get the index into the filters
+
+			idx = hash (u->pc, 0) % filter_size;
+
+			// the first time we encounter a branch, we will update
+			// no matter what to prime the predictor
+
+			need_to_update = !(filter[0][idx] || filter[1][idx]);
+
+			// we have seen this branch with this sense at least once now
+
+			filter[!!taken][idx] = true;
+
+			// see if the branch has never been taken or never been not taken
+
+			never_untaken = !filter[0][idx];
+			never_taken = !filter[1][idx];
+		}
+
+		// we need to update if there is no filter or if the filter
+		// has the branch with both senses
+
+		need_to_update |= !filter_size || (filter[0][idx] && filter[1][idx]);
+		if (need_to_update) {
+			// was the prediction from the weighted sum correct?
+
+			bool weighted_correct = (u->weighted_sum >= 0) == taken;
+
+			// was the prediction from the non-weighted sum correct?
+
+			bool correct = (u->sum >= 0) == taken;
+
+			// keep track of which one of those techniques is performing better
+
+			if (weighted_correct && !correct) {
+				if (psel < 511) psel++;
+			} else if (!weighted_correct && correct) {
+				if (psel > -512) psel--;
+			}
+
+			// update the coefficients
+
+			for (int i=0; i<num_tables; i++) {
+
+				// see what the sum would have been without this table
+
+				int sum = u->sum - table[i][u->indices[i]];
+
+				// would the prediction have been correct?
+
+				bool this_correct = (sum >= 0) == taken;
+				if (correct) {
+					// this table helped; increase its coefficient
+
+					if (!this_correct) if (coeffs[i] < (max_exp-1)) coeffs[i]++;
+				} else {
+					// this table hurt; decrease its coefficient
+
+					if (this_correct) if (coeffs[i] > -max_exp) coeffs[i]--;
+				}
+			}
+
+			// get the magnitude of the sum times a fudge factor
+
+			int a = abs ((int) (u->sum * coeff_train));
+
+			// get a random number between 0 and 1
+
+			double p = (rand_r (&my_seed) % 1000000) / 1000000.0;
+
+			// if the branch was predicted incorrectly according
+			// to the unweighted sum, if if the magnitude of the
+			// some does not exceed some random value near theta,
+			// then we must update the predictor
+
+			bool do_train = !correct || (a - (p/2 * theta_fuzz)) < theta;
+			if (do_train) {
+				// train the global tables
+
+				for (int i=0; i<num_tables; i++)
+					table[i][u->indices[i]] = satincdec (table[i][u->indices[i]], taken, max_weight, min_weight);
+
+				// train the local table
+
+				if (local_table_size) {
+					int x = local_pht[u->local_index];
+					x = satincdec (x, taken, max_weight, min_weight);
+					local_pht[u->local_index] = x;
+				}
+			}
+
+			// adjust theta
+
+			threshold_setting (u, correct, a);
+		}
+
+		// update global, path, and local histories
+
+		shift_history (global_history, taken ^ !!(u->pc & 4));
+		shift_history (path_history, (u->pc >> path_bit) & 1);
+		if (local_table_size) {
+
+			// don't record into a local history if this branch has trivial behavior
+
+			bool inhibit_local = never_taken || never_untaken;
+			if (!inhibit_local) {
+				local_histories[hash(u->pc,0)%local_num_histories] <<= 1;
+				local_histories[hash(u->pc,0)%local_num_histories] |= taken;
+			}
+		}
+	}
+
+
+	// record extra information provided by the infrastructure
+
+	void info (unsigned int pc, unsigned int optype) {
+
+		// maintain the callstack history
+
+		if (optype == 3) {
+			// push
+			callstack_history <<= 1;
+			callstack_history |= !!(pc & 4);
+		} else if (optype == 4) {
+			// pop 
+			callstack_history >>= 1;
+		}
+
+		// based on a mask, include or don't include certain bits in the histories
+
+		if (mask & (1<<optype)) {
+			if (mask & 0x40000000)
+				shift_history (path_history, (pc >> path_bit) & 1);
+			if (mask & 0x80000000)
+				shift_history (global_history, 1);
+		}
+	}
+};
+
+/////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////////////////
+
+static int xv[] = {
+0, 0, 0, 0, 0,
+0, 1, 0, 1, 5,
+0, 0, 0, 2, 0,
+0, 3, 0, 2, 1,
+0, 0, 0, 3, 0,
+0, 0, 0, 3, 0,
+0, 7, 1, 3, 7,
+0, 0, 0, 3, 0,
+0, 94, 0, 4, 6,
+0, 0, 0, 5, 0,
+12, 18, 1, 5, 1,
+1, 8, 1, 5, 1,
+5, 13, 1, 5, 1,
+12, 24, 1, 6, 0,
+2, 5, 1, 6, 1,
+0, 38, 1, 6, 5,
+5, 43, 0, 6, 0,
+21, 33, 1, 6, 1,
+0, 11, 1, 7, 5,
+8, 12, 1, 7, 7,
+2, 90, 1, 7, 3,
+0, 0, 0, 8, 0,
+0, 0, 0, 9, 0,
+0, 1, 1, 9, 3,
+0, 0, 0, 10, 0,
+0, 0, 0, 10, 0,
+0, 0, 0, 11, 0,
+0, 0, 0, 11, 0,
+0, 7, 0, 11, 1,
+0, 7, 1, 11, 1,
+0, 0, 0, 11, 0,
+0, 9, 1, 12, 4,
+0, 0, 0, 13, 0,
+5, 8, 1, 13, 7,
+12, 18, 1, 13, 1,
+13, 23, 1, 13, 3,
+0, 0, 0, 13, 0,
+0, 0, 0, 14, 0,
+0, 7, 1, 14, 4,
+2, 33, 1, 14, 0,
+14, 25, 0, 14, 1,
+21, 33, 1, 14, 1,
+0, 11, 0, 15, 1,
+0, 0, 0, 15, 0,
+8, 12, 1, 15, 0,
+};
+
+class PREDICTOR{
+
+	branch_predictor *pred;
+ public:
+
+  // The interface to the four functions below CAN NOT be changed
+
+	PREDICTOR(void) {
+		// give it a 4KB + 1024 bit byte hardware budget
+		pred = new sampler (xv, 45, 4096+1024/8);
+	}
+
+	branch_info *u;
+
+	bool GetPrediction(UINT32 PC) {
+		u = pred->lookup(PC, false, false);
+		return u->prediction();
+	}
+
+	void UpdatePredictor(UINT32 PC, bool resolveDir, bool predDir, UINT32 branchTarget) {
+		pred->update (u, resolveDir);
+	}
+
+	void TrackOtherInst(UINT32 PC, OpType opType, UINT32 branchTarget) {
+		switch (opType) {
+			case OPTYPE_CALL_DIRECT:
+			case OPTYPE_RET:
+			case OPTYPE_BRANCH_UNCOND:
+			case OPTYPE_INDIRECT_BR_CALL:
+			pred->info (PC, opType); break;
+			default: ;
+		}
+	}
+
+  // Contestants can define their own functions below
+
+};
+
+
+
+/***********************************************************/
+#endif
+
