@@ -19,3 +19,8 @@ geiser-history.guile
 emms/cache
 session.*
 *.swp
+traces/*.gz
+src/framework/traces/*.trace
+src/framework/traces/*.gz
+src/framework/traces/zgrep-output
+data/*
