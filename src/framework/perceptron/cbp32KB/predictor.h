@@ -5,7 +5,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include "utils.h"
-#include "tracer.h"
+//#include "tracer.h"
 #include <math.h>
 #include <string.h>
 
@@ -2424,23 +2424,33 @@ class PREDICTOR{
 
 	branch_info *u;
 
-	bool GetPrediction(UINT32 PC) {
+        bool    GetPrediction(UINT64 PC, bool btbANSF, bool btbATSF, bool btbDYN){
 		u = pred->lookup(PC & 0x0fffffff, false, false);
 		return u->prediction();
 	}
 
-	void UpdatePredictor(UINT32 PC, bool resolveDir, bool predDir, UINT32 branchTarget) {
+        void    UpdatePredictor(UINT64 PC, OpType opType, bool resolveDir, bool predDir, UINT64 branchTarget, bool btbANSF, bool btbATSF, bool btbDYN){
 		pred->update (u, resolveDir);
 	}
 
-	void TrackOtherInst(UINT32 PC, OpType opType, UINT32 branchTarget) {
-		switch (opType) {
-			case OPTYPE_CALL_DIRECT:
-			case OPTYPE_RET:
-			case OPTYPE_BRANCH_UNCOND:
-			case OPTYPE_INDIRECT_BR_CALL:
-			pred->info (PC & 0x0fffffff, opType); break;
-			default: ;
+        void    TrackOtherInst(UINT64 PC, OpType opType, bool branchDir, UINT64 branchTarget) {
+		switch (opType) {                  
+                           // case OPTYPE_CALL_DIRECT:
+                           // case OPTYPE_RET:
+                           // case OPTYPE_BRANCH_UNCOND:
+                           // case OPTYPE_INDIRECT_BR_CALL:
+                case OPTYPE_RET_UNCOND:
+                case OPTYPE_JMP_DIRECT_UNCOND:
+                case OPTYPE_JMP_INDIRECT_UNCOND:
+                case OPTYPE_CALL_DIRECT_UNCOND:
+                case OPTYPE_CALL_INDIRECT_UNCOND:
+                case OPTYPE_RET_COND:
+                case OPTYPE_JMP_DIRECT_COND:
+                case OPTYPE_JMP_INDIRECT_COND:
+                case OPTYPE_CALL_DIRECT_COND:
+                case OPTYPE_CALL_INDIRECT_COND:
+                  pred->info (PC & 0x0fffffff, opType); break;
+                default: ;
 		}
 	}
 
