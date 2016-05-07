@@ -1,0 +1,908 @@
+// -*- mode:c++; indent-tabs-mode:nil; -*-
+
+// This source code is derived from ISL-TAGE (CBP-3).
+// TAGE is based on the great work from Andre Seznec and Pierre Michaud.
+// In this source code, my contribution for the performance is quite small.
+
+// About ISL-TAGE, please refer to previous branch prediction championship.
+// URL: http://www.jilp.org/jwac-2/
+
+// About TAGE predictor, please refer to JILP online publication.
+// URL: http://www.jilp.org/vol8/v8paper1.pdf
+
+// In this predictor, we tried to combine local branch history to
+// improve the performance of TAGE predictor because there are no
+// effective way to exploit the local history for the partial tag
+// matching. We combine global branch history and local branch
+// history for the indexing part of TAGE branch predictor.
+// It helps to reduce the branch miss prediction.
+
+#ifndef _PREDICTOR_H_
+#define _PREDICTOR_H_
+
+#include "utils.h"
+// #include "tracer.h"
+#include <stdlib.h>
+#include <stdint.h>
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include <inttypes.h>
+#include <math.h>
+
+// #define RESTRICT_VERSION
+
+#ifndef RESTRICT_VERSION
+// These feature do not affect the accuracy of the submitted branch predictor.
+// However, to confirm the temporary variables do not affect the overall
+// performance, these variables should be disabled.
+  #define FOLDEDINDEXING
+  #define NOTCLEARTEMPORARYVARIABLES
+#endif
+
+// Enabling / disabling features...
+#define STATCOR
+
+// Table configuration parameters
+#define NSTEP 3
+#define NDIFF 3
+#define NALLOC 5
+#define NHIST 12
+#define NSTAT 3
+#define MSTAT 3
+#define TSTAT (NSTAT+MSTAT+1)
+
+#define CBIT 2
+#define UBIT 2
+
+// Local global branch history ratio
+#define LSTEP 2
+#define LG_RATIO 38
+
+// History length settings
+#define MINHIST 5
+#define MAXHIST 342
+#define MINCGHIST 2
+#define MAXCGHIST 7
+#define MINCLHIST 2
+#define MAXCLHIST 5
+
+// Tage parameters
+#define HYSTSHIFT 2
+#define LOGB 11
+#define LOGG  8
+
+// Statistic corrector parameters
+#define LOGC 9
+
+#define CBANK 3
+#define CSTAT 4
+
+// Maximum history width
+#define PHISTWIDTH 8
+
+// LHT parameters
+#define LHTBITS 4
+#define LHTSIZE (1<<LHTBITS)
+#define LHTMASK (LHTSIZE-1)
+#define LHISTWIDTH 5
+
+// Misc counter width
+#define UC_WIDTH 4
+#define UT_WIDTH 6
+#define UA_WIDTH 4
+#define TK_WIDTH 8
+
+//////////////////////////////////////////////////////
+// Base counter class
+//////////////////////////////////////////////////////
+
+// Counter base class
+template<typename T, int MAX, int MIN>
+class Counter {
+private:
+  T ctr;
+public:
+  T read(T val=0) { return ctr+val; }
+  bool pred() { return ctr >= 0; }
+  
+  bool satmax(){ return ctr == MAX; }
+  bool satmin(){ return ctr == MIN; }
+  
+  void setmax(){ ctr = MAX; }
+  void setmin(){ ctr = MIN; }
+  
+  void write(T v) {
+    assert(v <= MAX);
+    assert(v >= MIN);
+    ctr = v;
+  }
+  
+  void add(T d) {
+    ctr = ctr + d;
+    if (ctr > MAX){
+      ctr = MAX;
+    }else if (ctr < MIN){
+      ctr = MIN;
+    }
+  }
+  
+  void update(bool incr) {
+    if (incr) {
+      if (ctr < MAX)
+        ctr = ctr + 1;
+    } else {
+      if (ctr > MIN)
+        ctr = ctr - 1;
+    }
+  }
+  
+  virtual int budget() = 0;
+};
+
+//signed integer counter
+template<int WIDTH>
+class SCounter : public Counter<int32_t,((1<<(WIDTH-1))-1),(-(1<<(WIDTH-1)))>{
+public:
+  virtual int budget() {return WIDTH;}
+};
+
+//unsigned integer counter
+template<int WIDTH>
+class UCounter : public Counter<int32_t,((1<<(WIDTH))-1),0>{
+public:
+  virtual int budget() {return WIDTH;}
+};
+
+
+//////////////////////////////////////////////////////
+// history managemet data structure
+//////////////////////////////////////////////////////
+
+class GlobalHistoryBuffer {
+#ifdef FOLDEDINDEXING
+  // This implementation is used to save the simulation time.
+  static const int HISTBUFFERLENGTH = 4096;
+private:
+  int ptr;
+  bool bhr[HISTBUFFERLENGTH];
+  
+public:
+  int init() {
+    for(int i=0; i<HISTBUFFERLENGTH; i++) { bhr[i] = false; }
+    return MAXHIST;
+  }
+  
+  void push(bool taken) {
+    ptr--;
+    bhr[ptr & (HISTBUFFERLENGTH-1)] = taken;
+  }
+  
+  // read n_th history
+  bool read(int n) { return bhr[(n+ptr) & (HISTBUFFERLENGTH-1)]; }
+#else
+private:
+  bool bhr[MAXHIST];
+
+public:
+  int init() {
+    for(int i=0; i<MAXHIST; i++) { bhr[i] = false; }
+    return MAXHIST;
+  }
+
+  void push(bool taken) {
+    for(int i=MAXHIST-2; i>=0; i--) { bhr[i+1] = bhr[i]; }
+    bhr[0] = taken;
+  }
+  
+  bool read(int n) {
+    return bhr[n];
+  }
+#endif
+};
+
+
+class GlobalHistory : public GlobalHistoryBuffer {
+  
+#ifdef FOLDEDINDEXING
+private:
+  // Folded index (this register save the hash value of the global history,
+  // this values can be regenerated if the all branch histories are stored in the GHR)
+  class FoldedHistory {
+  public:
+    unsigned comp;
+    int CLENGTH;
+    int OLENGTH;
+    int OUTPOINT;
+    
+    void init (int original_length, int compressed_length) {
+      comp = 0;
+      OLENGTH = original_length;
+      CLENGTH = compressed_length;
+      OUTPOINT = OLENGTH % CLENGTH;
+    }
+    
+    void update (GlobalHistoryBuffer *h) {
+      comp = (comp << 1) | h->read(0);
+      comp ^= (h->read(OLENGTH) ? 1 : 0) << OUTPOINT;
+      comp ^= (comp >> CLENGTH);
+      comp &= (1 << CLENGTH) - 1;
+    }
+  };
+  FoldedHistory ch_i[NHIST];
+  FoldedHistory ch_c[NSTAT];
+  FoldedHistory ch_t[3][NHIST];
+  
+public:
+  void updateFoldedHistory() {
+    for (int i=0; i<NSTAT; i++) {
+      ch_c[i].update(this);
+    }
+    for (int i = 0; i < NHIST; i++) {
+      ch_i[i].update(this);
+      ch_t[0][i].update(this);
+      ch_t[1][i].update(this);
+      ch_t[2][i].update(this);
+    }
+  }
+  
+  void setup(int *m, int *l, int *t, int *c, int size) {
+    for (int i = 0; i < NHIST; i++) {
+      ch_i[i].init(m[i], l[i]);
+      ch_t[0][i].init(m[i], t[i]);
+      ch_t[1][i].init(m[i], t[i] - 1);
+      ch_t[2][i].init(m[i], t[i] - 2);
+    }
+    for (int i=0; i<NSTAT; i++) {
+      ch_c[i].init(c[i], size);
+    }
+  }
+  
+  uint32_t gidx(int n, int length, int clength) {
+    return ch_i[n].comp;
+  }
+  
+  uint32_t gtag(int n, int length, int clength) {
+    return ch_t[0][n].comp^(ch_t[1][n].comp<<1)^(ch_t[2][n].comp<<2);
+  }
+  
+  uint32_t cgidx(int n, int length, int clength) {
+    return ch_c[n].comp;
+  }
+  
+#else
+  
+public:
+  void updateFoldedHistory() { }
+  
+  void setup(int *m, int *l, int *t, int *c, int size) { }
+  
+  uint32_t comp(int length, int clength) {
+    uint32_t comp = 0;
+    for(int i=0; i<length; i++) {
+      comp ^= (read(i) << (i % clength));
+    }
+    return comp;
+  }
+  
+  uint32_t gidx(int n, int length, int clength) {
+    return comp(length, clength);
+  }
+  
+  uint32_t gtag(int n, int length, int clength) {
+    return comp(length,clength)^
+      (comp(length,clength-1)<<1)^
+      (comp(length,clength-2)<<2);
+  }
+  
+  uint32_t cgidx(int n, int length, int clength) {
+    return comp(length, clength);
+  }
+#endif
+  
+public:
+  void update(bool taken) {
+    push(taken);
+    updateFoldedHistory();
+  }
+};
+
+
+class LocalHistory {
+  uint32_t lht[LHTSIZE];
+  
+  uint32_t getIndex(uint32_t pc) {
+    pc = pc ^ (pc >> LHTBITS) ^ (pc >> (2*LHTBITS));
+    return pc & (LHTSIZE-1);
+  }
+  
+public:
+  int init() {
+    for(int i=0; i<LHTSIZE; i++) {
+      lht[i] = 0;
+    }
+    return LHISTWIDTH * LHTSIZE;
+  }
+  
+  void update(uint32_t pc, bool taken) {
+    lht[getIndex(pc)] <<= 1;
+    lht[getIndex(pc)] |= taken ? 1 : 0;
+    lht[getIndex(pc)] &= (1<<LHISTWIDTH) - 1;
+  }
+  
+  uint32_t read(uint32_t pc, int length, int clength) {
+    uint32_t h = lht[getIndex(pc)];
+    h &= (1 << length) - 1;
+    
+    uint32_t v = 0;
+    while(length > 0) {
+      v ^= h;
+      h >>= clength;
+      length -= clength;
+    }
+    return v & ((1 << clength) - 1);
+  }
+};
+
+//////////////////////////////////////////////////////////
+// Base predictor for TAGE predictor
+// This predictor is derived from CBP3 ISL-TAGE
+//////////////////////////////////////////////////////////
+
+template <int BITS, int HSFT>
+class Bimodal {
+private:
+  bool pred[1 << BITS];
+  bool hyst[1 << (BITS-HSFT)];
+  uint32_t getIndex(uint32_t pc, int shift=0) {
+    return (pc & ((1 << BITS)-1)) >> shift ;
+  }
+  
+public:
+  int init() {
+    for(int i=0; i<(1<<BITS); i++) { pred[i] = 0; }
+    for(int i=0; i<(1<<(BITS-HSFT)); i++) { hyst[i] = 1; }
+    return (1<<BITS)+(1<<(BITS-HSFT));
+  }
+  
+  bool predict(uint32_t pc) {
+    return pred[getIndex(pc)];
+  }
+  
+  void update(uint32_t pc, bool taken) {
+    int inter = (pred[getIndex(pc)] << 1) + hyst[getIndex(pc, HSFT)];
+    if(taken) {
+      if (inter < 3) { inter++; }
+    } else {
+      if (inter > 0) { inter--; }
+    }
+    pred[getIndex(pc)] = (inter & 2) >> 1;
+    hyst[getIndex(pc,HSFT)] = inter & 1;
+  }
+};
+
+//////////////////////////////////////////////////////////
+// Global component for TAGE predictor
+// This predictor is derived from CBP3 ISL-TAGE
+//////////////////////////////////////////////////////////
+
+class GEntry {
+public:
+  uint32_t tag;
+  SCounter<CBIT> c;
+  UCounter<UBIT> u;
+  
+  GEntry () {
+    tag = 0;
+    c.write(0);
+    u.write(0);
+  }
+  
+  void init(uint32_t t, bool taken, int uval=0) {
+    tag = t;
+    c.write(taken ? 0 : -1);
+    u.write(uval);
+  }
+  
+  bool newalloc() {
+    return (abs(2*c.read() + 1) == 1);
+  }
+};
+
+//////////////////////////////////////////////////////////
+// Put it all together.
+// The predictor main component class
+//////////////////////////////////////////////////////////
+
+// Configuration of table sharing strategy
+// static const int STEP[NSTEP+1] = {0, NDIFF, NHIST/2, NHIST-NDIFF, NHIST};
+// static const int STEP[NSTEP+1] = {0, NDIFF, NHIST-NDIFF, NHIST};
+static const int STEP[NSTEP+1] = {0, NDIFF, NHIST/2, NHIST};
+  
+class my_predictor {
+
+  /////////////////////////////////////////////////////////
+  // Constant Values
+  //
+  // These variables are not changed during simulation...
+  // So, we do not count these variables as the storage.
+  /////////////////////////////////////////////////////////
+  
+  // Tag width and index width of TAGE predictor
+  int TB[NHIST];
+  int logg[NHIST];
+  
+  // History length for TAGE predictor
+  int m[NHIST];
+  int l[NHIST];
+  int p[NHIST];
+  
+  // History length for statistical corrector predictors
+  int cg[NSTAT];
+  int cp[NSTAT];
+  int cl[MSTAT];
+  
+  /////////////////////////////////////////////////////////
+  // Temporary values
+  //
+  // These values can be computed from the prediction resources,
+  // but we use these values to save the simulation time
+  /////////////////////////////////////////////////////////
+  
+  // Index variables of TAGE and some other predictors
+  uint32_t CI[TSTAT];
+  uint32_t GI[NHIST];
+  uint32_t GTAG[NHIST];
+  
+  // Intermediate prediction result for TAGE
+  bool HitPred, AltPred, TagePred;
+  int HitBank, AltBank, TageBank;
+  
+  // Intermediate prediction result for statistical corrector predictor
+  bool SCPred;
+  int SCSum;
+  
+  // Intermediate prediction result for loop predictor
+  bool loopPred;
+  bool loopValid;
+
+  // This function is used for confirming the reset of temporal values
+  void clearTemporaryVariables() {
+    memset(CI, 0, sizeof(CI));
+    memset(GI, 0, sizeof(GI));
+    memset(GTAG, 0, sizeof(GTAG));
+    SCPred = HitPred = AltPred = TagePred = false;
+    SCSum  = HitBank = AltBank = TageBank = 0;
+    loopPred = loopValid = 0;
+  }
+  
+  /////////////////////////////////////////////////////////
+  // Hardware resoruce
+  //
+  // These variables are counted as the actual hardware
+  // These variables are not exceed the allocated budgeet (32KB + 1K bit)
+  /////////////////////////////////////////////////////////
+  
+  // Prediction Tables
+  Bimodal<LOGB,HYSTSHIFT> btable; // bimodal table
+  GEntry *gtable[NHIST]; // global components
+  SCounter<CSTAT> *ctable[2]; // statistical corrector predictor table
+  
+  // Branch Histories
+  GlobalHistory ghist; // global history register
+  LocalHistory lhist; // local history table
+  uint32_t phist; // path history register
+
+  // Profiling Counters
+  UCounter<UC_WIDTH> UC; // statistical corrector predictor tracking counter
+  SCounter<UT_WIDTH> UT; // statistical corrector predictor threshold counter
+  UCounter<TK_WIDTH> TICK; // tick counter for reseting u bit of global entryies
+  SCounter<UA_WIDTH> UA[NSTEP+1][NSTEP+1]; // newly allocated entry counter
+  
+private:
+  
+  //////////////////////////////////////////////////
+  // Setup history length
+  //////////////////////////////////////////////////
+  
+  void setHistoryLength(int *len, int num, int min, int max) {
+    for(int i=0; i<num; i++) {
+      double a = (double)max / (double)min;
+      double j = (double)i/(double)(num-1);
+      len[i] = (int)((min * pow(a, j)) + 0.5);
+      printf("%d, ", len[i]);
+    }
+    printf("\n");
+    assert(len[0] == min);
+    assert(len[num-1] == max);
+  }
+  
+  void setupHistoryConfiguration() {
+    printf("Setup history length...\n");
+    setHistoryLength(m, NHIST, MINHIST, MAXHIST);
+    setHistoryLength(cg, NSTAT, MINCGHIST, MAXCGHIST);
+    setHistoryLength(cl, MSTAT, MINCLHIST, MAXCLHIST);
+    
+    for (int i=0; i<NHIST; i++) {
+      l[i] = (int)(m[i] / LG_RATIO);
+      l[i] = (l[i] > LHISTWIDTH) ? LHISTWIDTH : l[i];
+      if(i < STEP[LSTEP]) {
+        l[i] = 0;
+      }
+      printf("%d,", l[i]);
+      p[i] = m[i];
+      p[i] = (p[i] > PHISTWIDTH) ? PHISTWIDTH : p[i];
+    }
+    printf("\n");
+    for (int i=0; i<NSTAT; i++) {
+      cp[i] = (cg[i] > PHISTWIDTH) ? PHISTWIDTH : cg[i];
+    }
+    for (int i=0; i<MSTAT; i++) {
+      assert(cl[i] <= LHISTWIDTH);
+    }
+  }
+  
+public:
+  
+  my_predictor (void) {
+    int budget=0;
+    
+    // Setup history length
+    setupHistoryConfiguration();
+    
+    // Setup misc registers
+    UC.write(0);
+    UT.write(0);
+    TICK.write(0);
+    budget += UC.budget();
+    budget += UT.budget();
+    budget += TICK.budget();
+
+    for(int i=0; i<NSTEP+1; i++) {
+      for(int j=0; j<NSTEP+1; j++) {
+        UA[i][j].write(0);
+        budget += UA[i][j].budget();
+      }
+    }
+
+    // Setup global components
+    logg[STEP[0]] = LOGG + 1; // 512
+    logg[STEP[1]] = LOGG + 2; // 1024
+    logg[STEP[2]] = LOGG + 1; // 512
+    TB[STEP[0]] =  8; //  8, 5
+    TB[STEP[1]] =  9; // 10, 7
+    TB[STEP[2]] = 10; //  9, 6
+    for(int i=0; i<NSTEP; i++) {
+      gtable[STEP[i]] = new GEntry[1 << logg[STEP[i]]];
+      budget += (UBIT+CBIT+TB[STEP[i]]) * (1<<logg[STEP[i]]);
+    }
+    for(int i=0; i<NSTEP; i++) {
+      for (int j=STEP[i]+1; j<STEP[i+1]; j++) {
+        logg[j]=logg[STEP[i]]-3;
+        gtable[j] = gtable[STEP[i]];
+        TB[j] = TB[STEP[i]];
+      }
+    }
+    
+    // Setup bimodal table
+    budget += btable.init();
+    
+    // Setup statistic corrector predictor
+    ctable[0] = new SCounter<CSTAT>[1 << LOGC];
+    ctable[1] = new SCounter<CSTAT>[1 << LOGC];
+    for(int i=0; i<(1<<LOGC); i++) {
+      ctable[0][i].write(-(i&1));
+      ctable[1][i].write(-(i&1));
+    }
+    budget += 2 * CSTAT * (1<<LOGC);
+
+    // Setup history register & table
+    phist = 0;
+    ghist.init();
+    lhist.init();
+    ghist.setup(m, logg, TB, cg, LOGC-CBANK);
+    budget += PHISTWIDTH;
+    budget += m[NHIST-1];
+    budget += LHISTWIDTH * LHTSIZE;
+    
+    // Output the total hardware budget
+    printf("Total Budget: Limit:%d, %d %d\n", (4*1024*8+1024), budget, budget/8);
+    assert(budget <= 33*1024);
+  }
+  
+  
+  //////////////////////////////////////////////////////////////
+  // Hash functions for TAGE and static corrector predictor
+  //////////////////////////////////////////////////////////////
+  
+  int F (int A, int size, int bank, int width) {
+    int A1, A2;
+    int rot = (bank+1) % width;
+    A = A & ((1 << size) - 1);
+    A1 = (A & ((1 << width) - 1));
+    A2 = (A >> width);
+    A2 = ((A2 << rot) & ((1 << width) - 1)) + (A2 >> (width - rot));
+    A = A1 ^ A2;
+    A = ((A << rot) & ((1 << width) - 1)) + (A >> (width - rot));
+    return (A);
+  }
+  
+  // gindex computes a full hash of pc, ghist and phist
+  uint32_t gindex(uint32_t pc, int bank, int hist) {
+    // we combine local branch history for the TAGE index computation
+    uint32_t index =
+      lhist.read(pc, l[bank], logg[bank]) ^
+      ghist.gidx(bank, m[bank], logg[bank]) ^
+      F(hist, p[bank], bank, logg[bank]) ^
+      (pc >> (abs (logg[bank] - bank) + 1)) ^ pc ;
+    return index & ((1 << logg[bank]) - 1);
+  }
+  
+  //  tag computation for TAGE predictor
+  uint32_t gtag(uint32_t pc, int bank) {
+    uint32_t tag = ghist.gtag(bank, m[bank], TB[bank]) ^ pc ;
+    return (tag & ((1 << TB[bank]) - 1));
+  }
+
+  // index computation for statistical corrector predictor
+  uint32_t cgindex (uint32_t pc, int bank, int hist, int size) {
+    uint32_t index =
+      ghist.cgidx(bank, cg[bank], size) ^
+      F(hist, cp[bank], bank, size) ^
+      (pc >> (abs (size - (bank+1)) + 1)) ^ pc ;
+    return index & ((1 << size) - 1);
+  }
+  
+  // index computation for statistical corrector predictor
+  uint32_t clindex (uint32_t pc, int bank, int size) {
+    uint32_t index =
+      lhist.read(pc, cl[bank], size) ^
+      (pc >> (abs (size - (bank+1)) + 1)) ^ pc ;
+    return index & ((1 << size) - 1);
+  }
+  
+  int uaindex(int bank) {
+    for(int i=0; i<NSTEP; i++) {
+      if(bank < STEP[i]) return i;
+    }
+    return NSTEP;
+  }
+  
+  //////////////////////////////////////////////////////////////
+  // Actual branch prediction and training algorithm
+  //////////////////////////////////////////////////////////////
+  
+  //compute the prediction
+  bool predict(uint32_t pc, uint16_t brtype) {
+    // Final prediction result
+    bool pred_taken = true;
+    
+    if (brtype == OPTYPE_BRANCH_COND) {
+#ifndef NOTCLEARTEMPORARYVARIABLES
+      clearTemporaryVariables();
+#endif
+
+      // Compute index values
+      for (int i = 0; i < NHIST; i++) {
+        GI[i] = gindex(pc, i, phist);
+        GTAG[i] = gtag(pc, i);
+      }
+      
+      // Update the index values for interleaving
+      for (int s=0; s<NSTEP; s++) {
+        for (int i=STEP[s]+1; i<STEP[s+1]; i++) {
+          GI[i]=((GI[STEP[s]]&7)^(i-STEP[s]))+(GI[i]<<3);
+        }
+      }
+      
+      // Compute the prediction result of TAGE predictor
+      HitBank = AltBank = -1;
+      HitPred = AltPred = btable.predict(pc);
+      for (int i=0; i<NHIST; i++) {
+        if (gtable[i][GI[i]].tag == GTAG[i]) {
+          AltBank = HitBank;
+          HitBank = i;
+          AltPred = HitPred;
+          HitPred = gtable[i][GI[i]].c.pred();
+        }        
+      }
+      
+      // Select the highest confident prediction result
+      TageBank = HitBank;
+      TagePred = HitPred;
+      if (HitBank >= 0) {
+        int u = UA[uaindex(HitBank)][uaindex(AltBank)].read();
+        if((u>=0)&&gtable[HitBank][GI[HitBank]].newalloc()) {
+          TagePred = AltPred;
+          TageBank = AltBank;
+        }
+      }
+      pred_taken = TagePred;
+      
+#ifdef STATCOR
+      // Compute the index values of the static corrector predictor
+      CI[0] = pc & ((1<<LOGC)-1);
+      for (int i=0; i<NSTAT; i++) {
+        CI[i+1] = cgindex(pc, i, phist, LOGC-CBANK);
+      }
+      for (int i=0; i<MSTAT; i++) {
+        CI[i+NSTAT+1] = clindex(pc, i, LOGC-CBANK);
+      }
+      for (int i=0; i<TSTAT; i++) {
+        if (i == (NSTAT)) { CI[i] ^= (TageBank+1) ; }
+        CI[i] <<= CBANK;
+        CI[i] ^= (pc ^ i) & ((1 << CBANK)-1);
+        CI[i] &= (1<<LOGC) - 1;
+      }
+      
+      // Overwrite TAGE prediction result if the confidence of
+      // the static corrector predictor is higher than the threshold.
+      if (HitBank >= 0) {
+        SCSum = 6 * (2 * gtable[HitBank][GI[HitBank]].c.read() + 1);
+        for (int i=0; i < TSTAT; i++) {
+          SCSum += (2 * ctable[TagePred][CI[i]].read()) + 1;
+        }
+        SCPred = (SCSum >= 0);
+        if (abs (SCSum) >= UC.read(5)) {
+          pred_taken = SCPred;
+        }
+      }
+#endif
+    }
+    
+    return pred_taken;
+  }
+  
+  void update(uint32_t pc, uint16_t brtype, bool taken, uint32_t target) {
+    if (brtype == OPTYPE_BRANCH_COND) {
+#ifndef NOTCLEARTEMPORARYVARIABLES
+      clearTemporaryVariables();
+      predict(pc, brtype); // re-calculate temporal variables
+#endif
+
+#ifdef STATCOR
+      if (HitBank >= 0) {
+        // Updates the threshold of the static corrector predictor
+        if (TagePred != SCPred) {
+          if ( (abs (SCSum) >= UC.read(1)) &&
+               (abs (SCSum) <= UC.read(3)) ) {
+            UT.update(SCPred == taken);
+            if (UT.satmax() && !UC.satmin()) {
+              UT.write(0);
+              UC.add(-2);
+            }
+            if (UT.satmin() && !UC.satmax()) {
+              UT.write(0);
+              UC.add(+2);
+            }
+          }
+        }
+        
+        // Updates the static corrector predictor tables
+        if ((SCPred != taken) || (abs (SCSum) < (0 + 6 * UC.read(5)))) {
+          for (int i=0; i<TSTAT; i++) {
+            ctable[TagePred][CI[i]].update(taken);
+          }
+        }
+      }
+#endif
+      
+      // Determining the allocation of new entries
+      bool ALLOC = (TagePred != taken) && (HitBank < (NHIST-1));
+      if (HitBank >= 0) {
+        if (gtable[HitBank][GI[HitBank]].newalloc()) {
+          if (HitPred == taken) {
+            ALLOC = false;
+          }
+          if (HitPred != AltPred) {
+            UA[uaindex(HitBank)][uaindex(AltBank)].update(AltPred == taken);
+          }
+        }
+      }
+      
+      
+      if (ALLOC) {
+        // Allocate new entries up to "NALLOC" entries are allocated
+        int T = 0;
+        for (int i=HitBank+1; i<NHIST; i+=1) {
+          if (gtable[i][GI[i]].u.read() == 0) {
+            gtable[i][GI[i]].init(GTAG[i], taken, 0);
+            TICK.add(-1);
+            if (T == NALLOC) break;
+            T += 1;
+            i += 1 + T/2; // After T th allocation, we skip 1+(T/2) tables.
+          } else {
+            TICK.add(+1);
+          }
+        }
+        
+        // Reset useful bit to release OLD useful entries
+        bool resetUbit = TICK.satmax();
+        if (resetUbit) {
+          TICK.write(0);
+          for (int s=0; s<NSTEP; s++) {
+            for (int j=0; j<(1<<logg[STEP[s]]); j++)
+              gtable[STEP[s]][j].u.add(-1);
+          }
+        }
+      }
+      
+      // Update prediction tables
+      // This part is same with ISL-TAGE branch predictor.
+      if (HitBank >= 0) {
+        gtable[HitBank][GI[HitBank]].c.update(taken);
+        if ((gtable[HitBank][GI[HitBank]].u.read() == 0)) {
+          if (AltBank >= 0) {
+            gtable[AltBank][GI[AltBank]].c.update(taken);
+          } else {
+            btable.update(pc, taken);
+          }
+        }
+      } else {
+        btable.update(pc, taken);
+      }
+      
+      // Update useful bit counter
+      // This useful counter updating strategy is derived from
+      // Re-reference interval prediction.
+      if (HitBank >= 0) {
+        bool useful = (HitPred == taken) && (AltPred != taken) ;
+        if(useful) {
+          gtable[HitBank][GI[HitBank]].u.setmax();
+        }
+      }
+    }
+
+    //////////////////////////////////////////////////
+    // Branch history management.
+    //////////////////////////////////////////////////
+
+    // How many history bits are inserted for the buffer
+    int maxt = 1;
+
+    // Special treamtment for function call
+    if (brtype == OPTYPE_INDIRECT_BR_CALL) maxt = 3 ;
+    if (brtype == OPTYPE_CALL_DIRECT     ) maxt = 5 ;
+
+    // Branch history information
+    // (This feature is derived from ISL-TAGE)
+    int T = ((target ^ (target >> 3) ^ pc) << 1) + taken;
+    
+    // Update global history and path history
+    for (int t = 0; t < maxt; t++) {
+      ghist.update((T >> t) & 1);
+      phist <<= 1;
+      phist += (pc >> t) & 1;
+      phist &= (1 << PHISTWIDTH) - 1;
+    }
+    
+    // Update local history
+    lhist.update(pc, taken);
+  }
+  
+};
+
+/////////////////////////////////////////////////////////////
+
+class PREDICTOR{
+
+ private:
+  my_predictor *tage;
+
+ public:
+
+  // The interface to the four functions below CAN NOT be changed
+
+  PREDICTOR(void);
+  bool    GetPrediction(UINT32 PC);  
+  void    UpdatePredictor(UINT32 PC, bool resolveDir, bool predDir, UINT32 branchTarget);
+  void    TrackOtherInst(UINT32 PC, OpType opType, UINT32 branchTarget);
+
+  // Contestants can define their own functions below
+
+};
+
+/////////////////////////////////////////////////////////////
+
+#endif
+

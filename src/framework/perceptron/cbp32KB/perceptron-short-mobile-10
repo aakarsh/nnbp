@@ -1,8 +1,0 @@
-start with 260160 bits
-244971 bits after accounting for local predictor
-history length is 896
-history size is 15
-210394 bits after accounting for filter
-table size is 1093
-ended up with 538 bits left over.
-.....................  TRACE 	 : ../../traces/SHORT_MOBILE-10.bt9.trace  NUM_INSTRUCTIONS            	 :  309468326  NUM_BR                      	 :   21751583  NUM_UNCOND_BR               	 :    1076746  NUM_CONDITIONAL_BR          	 :   20674837  NUM_CONDITIONAL_BR_BTB_MISS 	 :        966  NUM_CONDITIONAL_BR_BTB_ANSF 	 :    1663753  NUM_CONDITIONAL_BR_BTB_ATSF 	 :     289476  NUM_CONDITIONAL_BR_BTB_DYN  	 :   18720642  NUM_MISPREDICTIONS          	 :      36346  NUM_MISPREDICTIONS_BTB_MISS 	 :        416  NUM_MISPREDICTIONS_BTB_ANSF 	 :         69  NUM_MISPREDICTIONS_BTB_ATSF 	 :         93  NUM_MISPREDICTIONS_BTB_DYN  	 :      35768  MISPRED_PER_1K_INST         	 :     0.1174  MISPRED_PER_1K_INST_BTB_MISS	 :     0.0013  MISPRED_PER_1K_INST_BTB_ANSF	 :     0.0002  MISPRED_PER_1K_INST_BTB_ATSF	 :     0.0003  MISPRED_PER_1K_INST_BTB_DYN 	 :     0.1156
