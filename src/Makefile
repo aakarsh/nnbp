@@ -46,7 +46,7 @@ LDFLAGS += -L$(BOOST)/lib -Wl,-rpath $(BOOST)/lib
 INCLUDE_DIRS :=-I$(CBP_BASE) -I./base/ -I/usr/include -I/user/include/boost/ -I/usr/include/boost/iostreams/ -I/usr/include/boost/iostreams/device/ -I/usr/include/python2.7 -lpython2.7 
 
 
-CPPFLAGS := -O3 -Wall -std=c++11 \
+CPPFLAGS := -g -O3 -Wall -std=c++11 \
 		-Wextra -Winline -Winit-self -Wno-sequence-point -Wno-unused-function -Wno-inline -W -Wcast-qual -Wpointer-arith -Woverloaded-virtual\
 		-fPIC \
 
@@ -71,7 +71,9 @@ all:
 predictor: CPPFLAGS += $(INCLUDE_DIRS) -I./predictors/$(PREDICTOR)/$(BUDGET) 
 predictor: VPATH += ./predictors/$(PREDICTOR)/$(BUDGET)
 predictor: predictors/$(PREDICTOR)/$(BUDGET)/predictor.o base/main.o
-	$(CXX) $(CPPFLAGS) $(LDFLAGS)  -L./predictors/$(PREDICTOR)/$(BUDGET) -L./base/ -o ../bin/$(BUDGET)_$(PREDICTOR) $^ $(LDLIBS) 
+	$(CXX) $(CPPFLAGS) $(LDFLAGS)  -L./predictors/$(PREDICTOR)/$(BUDGET) -L./base/ -o ../bin/$(BUDGET)_$(PREDICTOR)_new $^ $(LDLIBS) 
+
+
 
 
 dbg: clean
