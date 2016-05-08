@@ -5,10 +5,12 @@
 #include <inttypes.h>
 #include <math.h>
 #include "utils.h"
-//// #include "tracer.h"
+
 #include <math.h>
 #include <string.h>
 
+// Try to provide a python interface 
+#include <py_interface.h>
 
 // search for "class sampler_info" to see my predictor code. preceding it is
 // some stuff from my infrastructure.
