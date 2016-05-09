@@ -79,6 +79,8 @@ int main(int argc, char* argv[]){
     UINT64 btb_miss_cond_branch_instruction_counter=0;
     UINT64 uncond_branch_instruction_counter=0;
 
+
+    fprintf(stderr,"Tracefile: %s\n Total Instructions: %d \nBranch Instructions : %d\n",trace_path.c_str(),total_instruction_counter,branch_instruction_counter);
   ///////////////////////////////////////////////
   // model simple branch marking structure
   ///////////////////////////////////////////////
@@ -96,7 +98,9 @@ int main(int argc, char* argv[]){
       bool branchTaken;
       UINT64 branchTarget;
       UINT64 numIter = 0;
-
+      
+      // Top Failing Branches
+      
       for (auto it = bt9_reader.begin(); it != bt9_reader.end(); ++it) {
         CheckHeartBeat(++numIter);
 
@@ -212,17 +216,21 @@ int main(int argc, char* argv[]){
 
             if (myBtbIterator == myBtb.end()) { //miss -> we have no history for the branch in the marking structure
               //printf("BTB miss ");
+              // insert with curent value of PC along with the fact that branch was taken
               myBtb.insert(pair<UINT64, UINT32>(PC, (UINT32)branchTaken)); //on a miss insert with outcome (N->btbANSF, T->btbATSF)
-              predDir = brpred->GetPrediction(PC, btbANSF, btbATSF, btbDYN);
-              brpred->UpdatePredictor(PC, opType, branchTaken, predDir, branchTarget, btbANSF, btbATSF, btbDYN); 
+              predDir = brpred->GetPrediction(PC, btbANSF, btbATSF, btbDYN); // all values are false
+              fprintf(stderr,"GetPrediction pc: 0x%2x: Pred:%d Hit:0 btbANSF:%d btbATSF:%d\n",PC,branchTaken == predDir ,btbANSF,btbATSF);
+              brpred->UpdatePredictor(PC, opType, branchTaken, predDir, branchTarget, btbANSF, btbATSF, btbDYN); // all booleans are false
             }
-            else {
+            else { // hit in the btb
+
               btbANSF = (myBtbIterator->second == 0);
               btbATSF = (myBtbIterator->second == 1);
               btbDYN = (myBtbIterator->second == 2);
               //printf("BTB hit ANSF: %d ATSF: %d DYN: %d ", btbANSF, btbATSF, btbDYN);
 
-              predDir = brpred->GetPrediction(PC, btbANSF, btbATSF, btbDYN);
+              predDir = brpred->GetPrediction(PC, btbANSF, btbATSF, btbDYN);              
+              fprintf(stderr,"GetPrediction pc: 0x%2x: Pred:%d Hit:1 btbANSF:%d btbATSF:%d\n",PC,branchTaken == predDir ,btbANSF,btbATSF);
               brpred->UpdatePredictor(PC, opType, branchTaken, predDir, branchTarget, btbANSF, btbATSF, btbDYN); 
 
               if (  (btbANSF && branchTaken)   // only exhibited N until now and we just got a T -> upgrade to dynamic conditional

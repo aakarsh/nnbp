@@ -55,8 +55,8 @@ PROGRAMS := predictor
 objects = predictor.o main.o
 
 all:
-	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=gshare predictor
-	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=perceptron predictor
+	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=perceptron VERBOSE=1 predictor
+#	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=gshare predictor
 #       $(MAKE) -d BUDGET=cbp32KB PREDICTOR=bias_free_neural predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=global_local_tage predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=hpattern predictor
@@ -65,13 +65,16 @@ all:
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=t_bag predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=tage_sc_l predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=temporal_stream predictor
-#	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=wormhole predictor
+#	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=wormhole  predictor
 
-
-predictor: CPPFLAGS += $(INCLUDE_DIRS) -I./predictors/$(PREDICTOR)/$(BUDGET) 
+predclean:
+	rm predictors/$(PREDICTOR)/$(BUDGET)/predictor.o
+	rm base/main.o
+predictor: CPPFLAGS += $(INCLUDE_DIRS) -I./predictors/$(PREDICTOR)/$(BUDGET) -D VERBOSE=$(VERBOSE)
 predictor: VPATH += ./predictors/$(PREDICTOR)/$(BUDGET)
-predictor: predictors/$(PREDICTOR)/$(BUDGET)/predictor.o base/main.o
-	$(CXX) $(CPPFLAGS) $(LDFLAGS)  -L./predictors/$(PREDICTOR)/$(BUDGET) -L./base/ -o ../bin/$(BUDGET)_$(PREDICTOR)_new $^ $(LDLIBS) 
+predictor: PREDICTOR_OBJ = predictors/$(PREDICTOR)/$(BUDGET)/predictor.o base/main.o
+predictor: predclean predictors/$(PREDICTOR)/$(BUDGET)/predictor.o base/main.o
+	$(CXX) $(CPPFLAGS) $(LDFLAGS)  -L./predictors/$(PREDICTOR)/$(BUDGET) -L./base/ -o ../bin/$(BUDGET)_$(PREDICTOR)_new $(PREDICTOR_OBJ) $(LDLIBS) 
 
 
 
