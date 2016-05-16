@@ -12,8 +12,8 @@ def print_summary():
     trace_time = {}
     for f in file_list:
         filename = os.path.basename(f)
-        fo = open(f)
-        line = fo.readline()
+        fh = open(f)
+        line = fh.readline()
         
         values = line.split()[1:]
         results ={}
@@ -22,9 +22,10 @@ def print_summary():
         
         if "MISPRED_PER_1K_INST" in results and len(results) > 0:
             trace_time[filename] = float(results["MISPRED_PER_1K_INST"])
+        fh.close()
 
     for key in sorted(trace_time,key=trace_time.get,reverse=True):
-        print key,"->",trace_time[key]
+        print "%-10f\t%s"%(trace_time[key],key)
 
 
 def grouper(n,iterable,fill_value = None):

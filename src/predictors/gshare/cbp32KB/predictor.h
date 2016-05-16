@@ -67,6 +67,7 @@ class PREDICTOR{
 
 PREDICTOR::PREDICTOR(void){
 
+
   historyLength    = HIST_LEN;
   ghr              = 0;
   numPhtEntries    = (1<< HIST_LEN);
@@ -76,6 +77,7 @@ PREDICTOR::PREDICTOR(void){
   for(UINT32 ii=0; ii< numPhtEntries; ii++){
     pht[ii]=PHT_CTR_INIT; 
   }
+  fprintf(stderr,"Gshare History:%d NumPhtEntries:%d\n",HIST_LEN,numPhtEntries);
   
 }
 

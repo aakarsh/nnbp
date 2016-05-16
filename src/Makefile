@@ -45,8 +45,8 @@ LDFLAGS += -L$(BOOST)/lib -Wl,-rpath $(BOOST)/lib
 
 INCLUDE_DIRS :=-I$(CBP_BASE) -I./base/ -I/usr/include -I/user/include/boost/ -I/usr/include/boost/iostreams/ -I/usr/include/boost/iostreams/device/ -I/usr/include/python2.7 -lpython2.7 
 
-
-CPPFLAGS := -g -O3 -Wall -std=c++11 \
+# remove -O3 ffs
+CPPFLAGS := -g -gdwarf-2   -Wall -std=c++11 \
 		-Wextra -Winline -Winit-self -Wno-sequence-point -Wno-unused-function -Wno-inline -W -Wcast-qual -Wpointer-arith -Woverloaded-virtual\
 		-fPIC \
 

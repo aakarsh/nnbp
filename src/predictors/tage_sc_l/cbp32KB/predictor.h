@@ -11,7 +11,7 @@
 //To get the predictor storage budget on stderr  uncomment the next line
 //#define PRINTSIZE
 #include "utils.h"
-// #include "tracer.h"
+
 
 #include <inttypes.h>
 #include <math.h>
@@ -313,58 +313,48 @@ predictorsize ()
       STORAGESIZE += (1 << (logg[i])) * (CWIDTH + UWIDTH + TB[i]);
 
     }
+   
  STORAGESIZE += 2 * (SIZEUSEALT) * 4;
-STORAGESIZE += (1 << LOGB) + (1 << (LOGB - HYSTSHIFT));
-STORAGESIZE+= m[NHIST];
-STORAGESIZE += PHISTWIDTH;
-STORAGESIZE += 10 ; //the TICK counter
+ STORAGESIZE += (1 << LOGB) + (1 << (LOGB - HYSTSHIFT));
+ STORAGESIZE+= m[NHIST];
+ STORAGESIZE += PHISTWIDTH;
+ STORAGESIZE += 10 ; //the TICK counter
 
-fprintf (stderr, " (TAGE %d) ", STORAGESIZE);  
+ fprintf (stderr, " (TAGE %d) ", STORAGESIZE);  
 
 #ifdef LOOPPREDICTOR
-
   inter= (1 << LOGL) * (2 * WIDTHNBITERLOOP + LOOPTAG + 4 + 4 + 1);fprintf (stderr, " (LOOP %d) ", inter); 
-  STORAGESIZE+= inter;
-  
+  STORAGESIZE+= inter;  
 #endif
 
 
   inter = 8 * (1 << LOGSIZEUP) ; //the update threshold counters
-inter += (PERCWIDTH) * 4 * (1 << (LOGBIAS));
-inter += (GNB-2) * (1 << (LOGGNB)) * (PERCWIDTH - 1) + (1 << (LOGGNB-1))*(2*PERCWIDTH-1);
-inter += (LNB-2) * (1 << (LOGLNB)) * (PERCWIDTH - 1) + (1 << (LOGLNB-1))*(2*PERCWIDTH-1);
+  inter += (PERCWIDTH) * 4 * (1 << (LOGBIAS));
+  inter += (GNB-2) * (1 << (LOGGNB)) * (PERCWIDTH - 1) + (1 << (LOGGNB-1))*(2*PERCWIDTH-1);
+  inter += (LNB-2) * (1 << (LOGLNB)) * (PERCWIDTH - 1) + (1 << (LOGLNB-1))*(2*PERCWIDTH-1);
 
 #ifndef REALISTIC
-inter += (SNB-2) * (1 << (LOGSNB)) * (PERCWIDTH - 1) + (1 << (LOGSNB-1))*(2*PERCWIDTH-1);
-inter += (TNB-2) * (1 << (LOGTNB)) * (PERCWIDTH - 1) + (1 << (LOGTNB-1))*(2*PERCWIDTH-1);
-inter += (PNB-2) * (1 << (LOGPNB)) * (PERCWIDTH - 1) + (1 << (LOGPNB-1))*(2*PERCWIDTH-1);
-
-
-
-inter += 16*16; // the history stack
-inter += 4; // the history stack pointer
-     inter += 16; //global histories for SC
-  
+  inter += (SNB-2) * (1 << (LOGSNB)) * (PERCWIDTH - 1) + (1 << (LOGSNB-1))*(2*PERCWIDTH-1);
+  inter += (TNB-2) * (1 << (LOGTNB)) * (PERCWIDTH - 1) + (1 << (LOGTNB-1))*(2*PERCWIDTH-1);
+  inter += (PNB-2) * (1 << (LOGPNB)) * (PERCWIDTH - 1) + (1 << (LOGPNB-1))*(2*PERCWIDTH-1);
+  inter += 16*16; // the history stack
+  inter += 4; // the history stack pointer
+  inter += 16; //global histories for SC  
   inter += NSECLOCAL * (Sm[0]+Tm[0]);
 #endif
+  
   inter += NLOCAL * Lm[0];
-inter += 3*CONFWIDTH; //the 3 counters in the choser
-STORAGESIZE+= inter;
-fprintf (stderr, " (SC %d) ", inter);
-
+  inter += 3*CONFWIDTH; //the 3 counters in the choser
+  STORAGESIZE+= inter;
+  fprintf (stderr, " (SC %d) ", inter);
 
 
 #ifdef PRINTSIZE
   fprintf (stderr, " (TOTAL %d) ", STORAGESIZE);
 #endif
 
-
   return (STORAGESIZE);
-
-
 }
-
-
 
 
 
@@ -1163,6 +1153,10 @@ Gupdate (PC, resolveDir,T_slhist[INDTLOCAL], Tm, TGEHL, TNB, LOGTNB);
 
   }
 
+
+  /**
+   *
+   */  
   int Gpredict (UINT32 PC, long long BHIST, int *length, int8_t ** tab,
 		int NBR, int logs)
   {
@@ -1191,6 +1185,10 @@ Gupdate (PC, resolveDir,T_slhist[INDTLOCAL], Tm, TGEHL, TNB, LOGTNB);
 return ((PERCSUM));
 
   }
+
+
+
+
   void Gupdate (UINT32 PC, bool taken, long long BHIST, int *length,
 		int8_t ** tab, int NBR, int logs)
   {

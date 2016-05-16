@@ -25,3 +25,7 @@ src/framework/traces/*.trace
 src/framework/traces/*.gz
 src/framework/traces/zgrep-output
 data/*
+GPATH
+GRTAGS
+GSYMS
+GTAGS

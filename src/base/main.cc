@@ -231,6 +231,7 @@ int main(int argc, char* argv[]){
 
               predDir = brpred->GetPrediction(PC, btbANSF, btbATSF, btbDYN);              
               fprintf(stderr,"GetPrediction pc: 0x%2x: Pred:%d Hit:1 btbANSF:%d btbATSF:%d\n",PC,branchTaken == predDir ,btbANSF,btbATSF);
+              
               brpred->UpdatePredictor(PC, opType, branchTaken, predDir, branchTarget, btbANSF, btbATSF, btbDYN); 
 
               if (  (btbANSF && branchTaken)   // only exhibited N until now and we just got a T -> upgrade to dynamic conditional

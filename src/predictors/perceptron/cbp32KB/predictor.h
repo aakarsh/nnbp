@@ -18,6 +18,7 @@
 struct binfo {
         unsigned int address, opcode, br_flags;
 };
+
 #define BR_CONDITIONAL 1
 
 // this class contains information that is kept between prediction and update
@@ -172,43 +173,114 @@ private:
 
 	// index an array of unsigned long long ints holding path/pattern/callstack history
 
+        
+        /**
+         * We are given a - bit inside index_history Take an array of
+         * history integers and then index into a particular bit of
+         * the history
+         * 1. First figure out which word it lies in 
+         * 2. Second figure out which bit it is supposed to index into
+         */
 	bool index_history (unsigned long long int *v, unsigned int index) {
-		unsigned int word_index = index / (sizeof (unsigned long long int) * 8);
-		if (word_index >= (unsigned int) history_size) return false; // too far
-		unsigned int word_offset = index % (sizeof (unsigned long long int) * 8);
-		return (v[word_index] >> word_offset) & 1;
+          
+          // First determine the index into the actual word
+          unsigned int word_index = index / (sizeof (unsigned long long int) * 8);
+          
+          // If word index greater than number of elements in history return 0
+          if (word_index >= (unsigned int) history_size) return false; // too far
+          
+          // Select the bit inside the word offset.
+          unsigned int word_offset = index % (sizeof (unsigned long long int) * 8);
+          return (v[word_index] >> word_offset) & 1;
+          
 	}
 
 	// fold a history of 'on' bits into 'cn' bits, skipping 'st'
 	// bits. inspired by Seznec's history folding function
 
-	unsigned int fold_history (unsigned long long int *v, int start, int on, int cn, int st) {
-		unsigned int r = 0;
+        /**
+         * Fold from on -> cn bits while skipping st bits
+         * ok this is totally mysterious
+         *  a <- 
+         *  b <-
+         * on <- end
+         * cn <- folding
+         * st <- stride
+         */
+	unsigned int fold_history(unsigned long long int *v, int start, int on, int cn, int st) {
+          
+          unsigned int r = 0;
 
-		// first part: go up to the highest multiple of 'cn' less than 'on'
+          // first part: go up to the highest multiple of 'cn' less than 'on'
 
-		int lim = (on / cn) * cn;
-		int i;
-		unsigned int q;
-		for (i=0; i<lim; i+=cn) {
-			q = 0;
-			for (int j=i; j<i+cn; j+=st) {
-				q <<= 1;
-				q |= index_history (v, start+j);
-			}
-			r ^= q;
-		}
+          /**
+           *
+           * on/cn * cn -> block number with cn
+           *
+           * 1. 
+           *
+           */
+          int lim = (on / cn) * cn;
+                
+          int i;
+          unsigned int q;
+          
+          /**
+           * Start from 0 and keep iterating through groups of cn. 
+           * 
+           * 'on' will have at most lim # of cn groups
+           *
+           */
+          // keep iterating in groups of cn
+          for (i = 0; i < lim; i += cn) {
+            
+            q = 0;
+            
+            /**
+             * Start at the beginning of the group.  Traverse the
+             *  group selected in strides of length st till end of the
+             *  group
+             */
+            for (int j = i; j < i + cn; j += st) {
+              
+              /**
+               * Move shift q by 1
+               */
+              q <<= 1;
+              /**
+               * pick the j'th element from history register and append it to q.
+               */
+              q |= index_history (v, start+j);                                
+            }
+            
+            // q encapsulates our stride wise selection of elements from this group
+            // r xor q 
+            // 000 ^ 101 = > 101 , 111 ^ 101 = 010
+            
+                        
+            r ^= q;
+            
+          }          
 
-		// second part: peel off last iteration and check we don't go over 'on'
+          // second part: peel off last iteration and check we don't go over 'on'
 
-		q = 0;
-		for (int j=i; j<on; j++) {
-			q <<= 1;
-			q |= index_history (v, start+j);
-		}
-		r ^= q;
-		return r & ((1<<cn)-1);
+          q = 0;
+          for (int j=i; j<on; j++) {
+            
+            q <<= 1;
+            q |= index_history (v, start+j);
+            
+          }
+          
+          // why the xor oh my why the xor ????
+          r ^= q;
+
+          // r with all stride length bits set to 1???
+          
+          return r & ((1<<cn)-1);
+          
 	}
+        
 
 	// hash functions by Thomas Wang, best live link is http://burtleburtle.net/bob/hash/integer.html
 
@@ -268,10 +340,14 @@ public:
 		int _bits = 6, 				// bit width of a weight
                 
                 /**
-                 * Why do we keep 32 perceptron weight tables?
+                 * Q:Why do we keep 32 perceptron weight tables?
+                 * 
                  */
 		int _num_tables = 32, 			// number of perceptron weights tables
                 
+                /**
+                 * How do we know that his is the width of hash function domain
+                 */
 		int _folding = 24, 			// width of hash function domain
                 
                 /**
@@ -284,8 +360,21 @@ public:
 		int _theta = 24, 			// initial value of threshold
                 
 		int _path_bit = 6, 			// which bit of the PC to use for global path history
+
                 
+                /**
+                 * This is based on work by Seznec on dynamic threshold fitting.
+                 *
+                 * 1. Optimial threshold varies for applications.
+                 * 2. We always check that speed is 7
+                 *
+                 */
 		int _speed = 7, 			// speed for dynamic threshold fitting
+                
+                
+                /**
+                 * 
+                 */
 		double _coeff_local = 2.25,	 	// coefficient for local predictor weight
 
                 /**
@@ -294,7 +383,8 @@ public:
 		int _local_table_size = 2048, 		// size of local predictor pattern history table
                 
                 /**
-                 * Limit for the length of per pc local history which we decide to keep.
+                 * Limit for the length of per pc local history which
+                 * we decide to keep.
                  */
 		int _local_history_length = 7, 		// history length for local predictor
                 
@@ -307,12 +397,19 @@ public:
 		int _local_num_histories = 256,		// number of local histories to keep
                 
 		double _theta_fuzz = 8.72, 		// neighborhood around theta to probabilistically train on correct prediction
+                
 		double _coeff_train = 1.004, 		// fudge factor for sum to decide whether training is needed
+                
 		double _coeff_base = 1.0000258,		// coefficients for weights learned at run-time are this raised to coeffs[i] power
-		int _max_exp = 131072,	 		// maximum value for coeffs[i] 
+                
+		int _max_exp = 131072,	 		// maximum value for coeffs[i]
+                
 		bool _primey = true,			// if true, decrease table sizes to nearest prime number
+                
 		unsigned int _mask = 0x40000018,	// used to determine which bits of non-conditional branch PCs to shift into which histories
+                
 		bool _static_prediction = false,
+                
 		int _local_shift = 0 ) :
 
 		// initialize 
@@ -379,16 +476,20 @@ public:
 		total_bits -= 64;
 
 		// initialize weighted versus non-weighted selector and account for its 10 bit width
-
+                
+                /**
+                 * A selector between weighted and non-weigthed selector
+                 */
 		psel = 0;
 		total_bits -= 10;
 
 		// coefficients are 18 bits each
 
 		total_bits -= 18 * num_tables;
+                
 		coeffs = (int *) my_malloc (sizeof (int) * num_tables);
                 
-		for (int i=0; i<num_tables; i++)
+		for (int i = 0; i < num_tables; i++)
                   coeffs[i] = 0;
 
 		// set up and account for local predictor
@@ -433,7 +534,9 @@ public:
 		// get an array to remember the indices from this iteration to the next
 		// does not count against h/w budget because we can recompute it (anyway, 
 		// if you want to count it it's at most 10 x 32 = 320 bits
-
+                /**
+                 * Indices is an array of integers one per table of perceptrons
+                 */
 		p.indices = (unsigned int *) my_malloc (num_tables * sizeof (unsigned int));
 
 		// compute maximum and minimum weights
@@ -446,8 +549,12 @@ public:
 		min_weight = -(1<<bits)/2;
 
 		// initialize and accont for adaptive threshold fitting counter (it is never more than 8 bits)
-
+                
+                /**
+                 * Some sort of threshold counter.
+                 */
 		tc = 0;
+                
 		total_bits -= 8;
 
 		// initialize and account for theta (it is never more than 9 bits)
@@ -551,33 +658,45 @@ public:
          * Saturating increment/decrement 
          */
 	byte satincdec (byte weight, bool taken, int max, int min) {
-		if (taken) {
-			return (weight < max) ? weight + 1 : weight;
-		} else {
-			return (weight > min) ? weight - 1 : weight;
-		}
+          if (taken) {
+            return (weight < max) ? weight + 1 : weight;
+          } else {
+            return (weight > min) ? weight - 1 : weight;
+          }
 	}
 
 	// dynamic threshold updating per Seznec
-
+        
+        /**
+         * 
+         */
 	void threshold_setting (sampler_info *u, bool correct, int a) {
-		if (!correct) {
-			tc++;
-			if (tc >= speed) {
-				theta++;
-				tc = 0;
-			}
-		}
-		if (correct && a < theta) {
-			tc--;
-			if (tc <= -speed) {
-				theta--;
-				tc = 0;
-			}
-		}
+          
+          if (!correct) { 
+            tc++; // increase tc on every incorrect guess
+            if (tc >= speed) {
+              theta++;
+              tc = 0;
+            }
+          }
+          
+          if (correct && a < theta) {
+            
+            /**
+             * Reduce speed on every correct guess where maginitude is
+             * less than theta.
+             */
+            tc--;
+            if (tc <= -speed) {
+              theta--;
+              // 
+              tc = 0;
+            }
+          }
 	}
 
 	// return a local history for this pc
+        
         /**
          * Takes the pc. Runs it throught on of the hashes. and cuts
          * off some bits to map into the local_history table.  After
@@ -593,59 +712,191 @@ public:
 		return (l ^ pc) % local_table_size;
 	}
 
+        /**
+         * 
+         */
 	void compute_partial_index (unsigned int *index, unsigned int pc, int start, int end, int kind, int which, int stride) {
-		unsigned int partial_index = hash (pc, which);
-		partial_index ^= fold_history (histories[kind], start, end-start, folding, stride);
-		*index = *index * 2 + partial_index;
+          // Pick a certain hash
+          unsigned int partial_index = hash (pc, which);
+          
+          // Stride over the global history
+          // Folding - width of hash function domain
+          
+          /**
+           * 
+           */
+          partial_index ^= fold_history(histories[kind], start, end-start, folding, stride);
+
+          *index = *index * 2 + partial_index;
+
+          fprintf(stderr,"\ncompute_partial_index pc:%10x index:%10u  history:%10d hash-which:%d  [%4d-%4d,%4d]\n",pc,*index,kind,which,start,end,stride);
+          
 	}
 
+
+        /**
+         * Reads a perceptron table. value in perceptron table to weight
+         * sets perceptron u->indices[t] = to index in the table
+         */
 	void finish_index (unsigned int *index, int this_table, sampler_info *u) {
-		*index %= table_size;
-		int x = table[this_table][*index];
-		u->sum += x;
-		u->weighted_sum += pow (coeff_base, coeffs[this_table]) * x;
-		u->indices[this_table] = *index;
-		*index = 0;
+          fprintf(stderr,"\nfinish_index[Entry]: Table:%-5d Index %-5u  Sum:%5d\n",this_table,*index,u->sum);
+          /* modulo the computed index by the table size */
+          *index %= table_size;
+          
+          /* Read one of the perceptron tables */
+          int x = table[this_table][*index];
+
+          /*    */
+          u->sum += x;
+          if(this_table == 0)
+            fprintf(stderr,"\n");
+          
+          fprintf(stderr,"finish_index: Table:%-5d Index %-5u Weight:%5d Sum:%5d\n",this_table,*index,x,u->sum);
+          
+          u->weighted_sum += pow (coeff_base, coeffs[this_table]) * x;
+          u->indices[this_table] = *index;
+          
+          *index = 0;
 	}
 
+
+//void compute_partial_index (unsigned int *index, unsigned int pc, int start, int end, int kind(history type), int which(hash type), int stride(stride length) )
+/**
+   start -> a
+   end -> b
+   kind -> c
+   which -> t
+   stride -> d
+   
+ */
 #define C(a, b, c, d) compute_partial_index (&j, pc, a, b, c, t, d);
+
+        
+/**
+ * Compute the partial index with with start - > 0  end -> 0 , kind -> t, stride -> 0 
+ int start -> 0,
+ int end   -> 0, 
+ int kind  -> 0,
+ int which -> t,
+ int stride -> 0
+ */
 #define B() compute_partial_index (&j, pc, 0, 0, 0, t, 0);
+
+/**
+ * Move on to next table 
+ */
+/**
+   
+ */
 #define F() finish_index (&j, t++, u);
+
 
 	double compute_indices_0 (unsigned int pc, sampler_info *u) {
 		unsigned int j = 0, t = 0;
-		B();C(0,3,0,1);F();
-		C(1,4,1,5);C(14,27,0,1);F();
-		C(0,7,1,4);F();
-		B();C(2,9,0,2);C(5,33,1,3);F();
-		B();C(0,14,1,5);F();
-		C(0,18,0,3);F();
-		C(0,120,0,3);C(7,13,0,6);F();
-		C(0,1,1,3);C(0,2,0,4);C(0,17,1,5);C(11,30,1,1);F();
-		C(7,30,1,4);C(0,11,1,2);C(0,4,0,8);C(8,12,1,4);F();
-		C(0,42,0,7);F();
-		C(1,6,0,4);C(0,16,0,8);C(2,55,0,1);C(8,39,0,4);F();
-		C(49,57,1,5);F();
-		C(7,12,1,5);F();
-		C(11,30,1,1);C(7,11,0,1);C(0,50,0,4);C(13,58,0,4);C(13,20,1,1);C(0,3,1,6);F();
-		C(0,4,0,2);F();
-		B();B();C(0,116,0,3);C(0,63,0,4);F();
-		C(2,7,0,5);C(66,139,0,2);C(9,16,0,3);F();
-		C(99,142,0,2);C(0,9,0,3);F();
-		C(27,71,1,8);C(1,24,1,8);C(46,147,1,1);C(38,57,0,7);F();
-		C(0,65,0,4);C(0,40,0,4);C(14,21,1,6);C(0,52,0,4);C(25,46,1,2);C(3,214,1,2);C(56,76,1,5);F();
-		C(9,221,1,6);F();
-		C(0,31,1,2);C(0,253,1,8);C(0,54,0,5);F();
-		C(0,255,1,8);B();C(1,12,1,4);F();
-		B();C(0,45,0,8);C(17,26,1,3);C(0,2,0,1);C(0,4,1,1);B();B();C(0,27,0,7);C(0,7,0,2);B();C(0,4,1,7);C(14,258,0,1);C(10,28,1,7);F();
-		C(6,14,0,4);C(0,260,0,1);F();
-		C(31,37,0,2);C(31,43,1,3);C(10,264,1,2);F();
-		C(0,7,0,1);C(45,351,1,2);C(6,27,1,4);C(0,42,0,8);C(6,14,0,3);F();
-		C(0,2,0,1);C(65,403,1,2);C(0,16,0,1);C(0,16,1,8);C(0,65,1,2);F();
-		C(2,20,0,1);C(5,9,1,3);C(0,8,0,4);C(76,417,1,5);C(14,258,0,1);C(0,26,1,6);C(38,57,1,3);F();
-		C(82,434,1,5);C(19,54,1,7);C(4,253,1,8);F();
-		C(19,54,1,7);F();
-		C(0,153,1,6);C(8,718,1,4);C(1,11,1,7);C(6,712,1,5);F();
+                /**
+                 * Understanding single generated stride
+                 */
+                // start with j=0 pc=pc , start=0,end=0,kind=0 /* global history */ ,stride =0
+		B(); 
+                // t = t // which is 0 for global history
+                C(0,3,0,1); 
+                F(); // t in incremented 
+
+		C(1,4,1,5);
+                C(14,27,0,1);
+                F(); // incremnt t=1
+                
+		C(0,7,1,4);
+                F(); //increment t=2
+                
+		B();C(2,9,0,2);C(5,33,1,3);
+                F(); // t = 3
+                
+		B();C(0,14,1,5);
+                F(); // t = 4
+                
+		C(0,18,0,3);
+                F(); // t = 5
+                
+		C(0,120,0,3);C(7,13,0,6);
+                F(); // t = 6
+                
+		C(0,1,1,3);C(0,2,0,4);C(0,17,1,5);C(11,30,1,1);
+                F(); // t = 7
+
+		C(7,30,1,4);C(0,11,1,2);C(0,4,0,8);C(8,12,1,4);
+                F(); // t = 8
+                
+		C(0,42,0,7);
+                F(); // t = 9 
+                
+		C(1,6,0,4);C(0,16,0,8);C(2,55,0,1);C(8,39,0,4);
+                F(); // t = 10
+                
+		C(49,57,1,5);
+                F(); // t = 11
+                
+		C(7,12,1,5);
+                F(); // t=
+                
+		C(11,30,1,1);C(7,11,0,1);C(0,50,0,4);C(13,58,0,4);C(13,20,1,1);C(0,3,1,6);
+                F(); // t=
+                
+		C(0,4,0,2);
+                F(); // t=
+                
+		B();B();C(0,116,0,3);C(0,63,0,4);
+                F(); // t=
+                
+		C(2,7,0,5);C(66,139,0,2);C(9,16,0,3);
+                F(); // t=
+                
+		C(99,142,0,2);C(0,9,0,3);
+                F(); // t=
+                
+		C(27,71,1,8);C(1,24,1,8);C(46,147,1,1);C(38,57,0,7);
+                F(); // t=
+                
+		C(0,65,0,4);C(0,40,0,4);C(14,21,1,6);C(0,52,0,4);C(25,46,1,2);C(3,214,1,2);C(56,76,1,5);
+                F(); // t=
+                
+		C(9,221,1,6);
+                F(); // t=
+                
+		C(0,31,1,2);C(0,253,1,8);C(0,54,0,5);
+                F(); // t=
+                
+		C(0,255,1,8);B();C(1,12,1,4);
+                F(); // t=
+                
+		B();C(0,45,0,8);C(17,26,1,3);C(0,2,0,1);C(0,4,1,1);B();B();C(0,27,0,7);C(0,7,0,2);B();C(0,4,1,7);C(14,258,0,1);C(10,28,1,7);
+                F(); // t=
+                
+		C(6,14,0,4);C(0,260,0,1);
+                F(); // t=
+                
+		C(31,37,0,2);C(31,43,1,3);C(10,264,1,2);
+                F(); // t=
+                
+		C(0,7,0,1);C(45,351,1,2);C(6,27,1,4);C(0,42,0,8);C(6,14,0,3);
+                F(); // t=
+                
+		C(0,2,0,1);C(65,403,1,2);C(0,16,0,1);C(0,16,1,8);C(0,65,1,2);
+                F(); // t=
+                
+		C(2,20,0,1);C(5,9,1,3);C(0,8,0,4);C(76,417,1,5);C(14,258,0,1);C(0,26,1,6);C(38,57,1,3);
+                F(); // t=
+                
+		C(82,434,1,5);C(19,54,1,7);C(4,253,1,8);
+                F(); // t=
+                
+		C(19,54,1,7);
+                F(); // t=
+                
+		C(0,153,1,6);C(8,718,1,4);C(1,11,1,7);C(6,712,1,5);
+                F(); // t=
+                
+                
 		return 2.399032;
 	}
 
@@ -2177,6 +2428,9 @@ public:
 	}
 
 	double compute_indices (unsigned int pc, sampler_info *u) {
+          fprintf(stderr,"compute_indices: %x",pc);
+          return compute_indices_0(pc,u);
+          /**
 		switch (signature) {
 		case 0x40591c: return compute_indices_0 (pc, u);
 		case 0x415aa4: return compute_indices_1 (pc, u);
@@ -2220,20 +2474,44 @@ public:
 		case 0x404ba9: return compute_indices_39 (pc, u);
 		default: return compute_indices_40 (pc, u);
 		}
+          */
 	}
 
+
+        /**
+         * Takes pc and tries to predict u->prediction.
+         */
 	void compute_sums (unsigned int pc, sampler_info *u) {
           
           // initialize indices
-          for (int i=0; i<num_tables; i++)
+          /**
+           * For each table we set indices to 0
+           */
+          for (int i = 0; i < num_tables; i++)
             u->indices[i] = 0;
 
           // for each sample, accumulate a partial index
 
+          /**
+           *
+           */
           histories[0] = global_history;
           histories[1] = path_history;
           histories[2] = &callstack_history;
-
+          
+          // TODO 
+          // Maybe hook in here
+          // Just pass in global_history,path_history,callstack_history,local_history
+          // so for each pc we will create a string with these three variables
+          // and desire branch outcome.
+          // create a convolution network 
+          // allow it to train on the trace.
+          // graph the predictions with accuracy. ?
+          // what should it be , what is it?
+          // this will not qualify with any of the entries.
+          // final result should be yes/no decision
+          // why do we need to give it the PC ? -> just decide based on local-hostry,path_history and call_stack history
+          
           
           /**
            * This seems like a completely magical quantity. I have no
@@ -2241,6 +2519,11 @@ public:
            */
           double coeff = compute_indices (pc, u);
           
+          // Final result is some double value
+          
+          /**
+           * Q: What are the indices supposed bo be doing ? 
+           */          
           // now we have all the indices. use them to compute
           // the weighted and unweighted sums
 
@@ -2249,6 +2532,7 @@ public:
            * Since we always keep the list of local histories.
            */
           if (local_table_size) {
+            
             u->local_index = get_local_history (pc);
             int x = local_pht[u->local_index];
             
@@ -2258,78 +2542,102 @@ public:
              * local histry from the local pht
              * 
              * We also consider distinct values of coeff_local and coeff.
-             * 
+             *
              */            
+            // it seems we can just multipythe value into x which is the value of local_pht ??
             u->sum += (int) (coeff * x);
             u->weighted_sum += (int) (coeff_local * x);
+            
           }
 	}
 
 
         /**
-         * look up a prediction in the predictor
+         * Look up a prediction in the predictor
          */
 	branch_info *lookup (unsigned int pc, bool, bool) { 
-		sampler_info *u = &p;
-		u->pc = pc;
-		if (!signature) {
-			check_signature (pc);
-			if (signature) reset_tables ();
-		}
+          sampler_info *u = &p;
+          u->pc = pc;
+          if (!signature) {
+            check_signature (pc);
+            if (signature) reset_tables ();
+          }
 
-		// initialize two sums
+          // initialize two sums
 
-		u->sum = 0.0;
-		u->weighted_sum = 0.0;
+          u->sum = 0.0;
+          u->weighted_sum = 0.0;
 
-		// an index into the filter
+          // an index into the filter
 
-		unsigned int idx;
-		bool new_branch = false;
-		if (filter_size) {
-			idx = hash (u->pc, 0) % filter_size;
+          unsigned int idx;
+          bool new_branch = false;
+          if (filter_size) {
+            idx = hash (u->pc, 0) % filter_size;
 
-			// remember whether this is the first time we are seeing this branch
+            // remember whether this is the first time we are seeing this branch
 
-			new_branch = !(filter[0][idx] || filter[1][idx]);
-		}
+            new_branch = !(filter[0][idx] || filter[1][idx]);
+          }
 
-		// if the branch is in exactly one filter...
+          // if the branch is in exactly one filter...
 
-		if (filter_size && (filter[0][idx] != filter[1][idx])) {
+          if (filter_size && (filter[0][idx] != filter[1][idx])) {
 
-			// ...predict the branch will do what its been observed doing before
+            // ...predict the branch will do what its been observed doing before
 
-			if (filter[0][idx]) {
-				u->prediction (false);
-				u->weighted_sum = min_weight;
-				u->sum = min_weight;
-			} else if (filter[1][idx]) {
-				u->prediction (true);
-				u->weighted_sum = max_weight;
-				u->sum = max_weight;
-			}
-		} else {
-			// it's in both filters; have to predict it with
-			// perceptron predictor
-			compute_sums (pc, u);
-		}
-		if (new_branch) {
-			// if this is a new branch, predict it statically
+            /**
+             * Here we catch and inter out trivial branches which have
+             * so far never switched in behavior
+             */
+            if (filter[0][idx]) {
+              fprintf(stderr,"Trivial False: %x\n",pc);
+              u->prediction (false);
+              u->weighted_sum = min_weight;
+              u->sum = min_weight;
+              
+            } else if (filter[1][idx]) { 
+              fprintf(stderr,"Trivial True: %x\n",pc);
+              u->prediction (true);
+              u->weighted_sum = max_weight;
+              u->sum = max_weight;
+              
+            }
+            
+          } else {  
+            /**
+             * If the branch has be been seen to switch state then it
+             * uses non trivial behavior which needs to be predicted.
+             */
+            
+            // it's in both filters; have to predict it with
+            // perceptron predictor
+            fprintf(stderr,"Perceptron Predict: %x\n",pc);
+            compute_sums (pc, u);
+          }
+          
+          if (new_branch) {
+            // if this is a new branch, predict it statically
+                  
+            /**
+             * Since we disable static prediction i dont know
+             * what this is about
+             */
+            u->prediction (static_prediction);
 
-			u->prediction (static_prediction);
-		} else {
-			// give the prediction with the kind of sum that seems do
-			// be doing well
-			bool prediction;
-
-			if (psel >= 0) 
-				prediction = u->weighted_sum >= 0.0;
-			else
-				prediction = u->sum >= 0.0;
-			u->prediction (prediction);
-		}
-		return u;
+          } else {
+            // give the prediction with the kind of sum that seems do
+            // be doing well
+            bool prediction;
+                        
+            if (psel >= 0) {
+              prediction = u->weighted_sum >= 0.0;
+            } else {
+              prediction = u->sum >= 0.0;
+            }
+            u->prediction (prediction);
+          }
+          return u;
 	}
 
 	// update an executed branch
@@ -2348,8 +2656,8 @@ public:
 		unsigned int idx = 0;
 
 		// we don't know that we need to update yet
-
 		bool need_to_update = false;
+                
 		if (filter_size) {
 
                   // get the index into the filters
@@ -2359,17 +2667,19 @@ public:
                   
 
                   // the first time we encounter a branch, we will update
-                  // no matter what to prime the predictor                  
+                  // no matter what to prime the predictor
+                  
                   /**
                    * If we see the branch as being taken in either
                    * filter[0] or filter[1] we will consider the, and
                    * no filter bit has been set in either one then we
                    * will request an update.
                    */
+                  
                   /**
                    * 1. both filter[0] and filter[1] are zero  -> update
                    * 2. filter[1] are different filter[0]      -> no update
-                   * 3. filter[0] and filter[1] are one       -> no update
+                   * 3. filter[0] and filter[1] are one        -> no update
                    */
                   need_to_update = !(filter[0][idx] || filter[1][idx]);
 
@@ -2380,7 +2690,8 @@ public:
                    * taken == 1 -> filter[1] <- true
                    * taken == 0 -> filter[0] <- true
                    */
-                  // we have seen this branch with this sense at least once now
+                  
+                  // We have seen this branch with this sense at least once now
                   filter[!!taken][idx] = true;
 
 
@@ -2389,13 +2700,14 @@ public:
                    * filter[1] -> true  => never_take   <-  0 # we have seen it as taken at least once
                    */
                   // see if the branch has never been taken or never been not taken
+                  
                   never_untaken = !filter[0][idx];
                   never_taken = !filter[1][idx];
+
 		}
 
 		// we need to update if there is no filter or if the filter
 		// has the branch with both senses
-
                 
                 /**
                  * Assuming not in simple cases :
@@ -2406,6 +2718,7 @@ public:
                  */
 		need_to_update |= !filter_size || (filter[0][idx] && filter[1][idx]);
                 
+                // Allow the branch decistion to hit the perceptron tables                
 		if (need_to_update) {
                   
                   // was the prediction from the weighted sum correct?
@@ -2416,38 +2729,63 @@ public:
 
                   bool correct = (u->sum >= 0) == taken;
 
-                  // keep track of which one of those techniques is performing better
-
+                  // Keep track of which one of those techniques is performing better
+                  
+                  /**
+                   * We compare the validity of weigthed and non weighted predictions
+                   * psel is a saturating metric of confidence. 
+                   *
+                   * where positive values indicate picking
+                   * weighted_sum and negative values mean use un
+                   * weighted sums.
+                   */
+                  
                   if (weighted_correct && !correct) {
-                    if (psel < 511) psel++;
+                    if (psel < 511)
+                      psel++;
                   } else if (!weighted_correct && correct) {
-                    if (psel > -512) psel--;
+                    if (psel > -512)
+                      psel--;
                   }
 
                   // update the coefficients
-
-                  for (int i=0; i<num_tables; i++) {
+                  /**
+                   * Iterate through each table 
+                   */
+                  for (int i = 0; i < num_tables; i++) {
 
                     // see what the sum would have been without this table
-
+                    // pick table and corresponding indices
+                    
+                    /**
+                     * 1. remove table's weight from the total sum
+                     * 2. check if the sum would have been correct 
+                     */
                     int sum = u->sum - table[i][u->indices[i]];
+                    
 
                     // would the prediction have been correct?
 
                     bool this_correct = (sum >= 0) == taken;
-                    if (correct) {
+                    if (correct) {// if branch was correctly predicted
                       // this table helped; increase its coefficient
 
-                      if (!this_correct) if (coeffs[i] < (max_exp-1)) coeffs[i]++;
-                    } else {
+                      if (!this_correct)
+                        if (coeffs[i] < (max_exp-1)) coeffs[i]++;
+                      
+                    } else { // branch was not currect 
                       // this table hurt; decrease its coefficient
-
-                      if (this_correct) if (coeffs[i] > -max_exp) coeffs[i]--;
+                      
+                      if (this_correct)
+                        if (coeffs[i] > -max_exp) coeffs[i]--;
                     }
                   }
 
-                  // get the magnitude of the sum times a fudge factor
-
+                  // Get the magnitude of the sum times a fudge factor
+                  
+                  /**
+                   * We look at magnited, deviation from 0 of sum from 
+                   */
                   int a = abs ((int) (u->sum * coeff_train));
 
                   // get a random number between 0 and 1
@@ -2458,8 +2796,15 @@ public:
                   // to the unweighted sum, if if the magnitude of the
                   // some does not exceed some random value near theta,
                   // then we must update the predictor
-
+                  
+                  /**
+                   * Train if 
+                   * 1. Incorrect prediction
+                   * 2. If magnitude of deviation from zero within random error factor
+                   *    is theta. That is we have not reached training saturation
+                   */
                   bool do_train = !correct || (a - (p/2 * theta_fuzz)) < theta;
+                  
                   if (do_train) {
                     // train the global tables
 
@@ -2478,11 +2823,18 @@ public:
                       int x = local_pht[u->local_index];
                       x = satincdec (x, taken, max_weight, min_weight);
                       local_pht[u->local_index] = x;
+                      
                     }
+                    
+                    
                   }
 
                   // adjust theta
-
+                  /**
+                   * This is part of dynamic threshold setting in
+                   * branch prediction schemes where we want to adjust
+                   * speed of convergence on incorrenct branches.
+                   */
                   threshold_setting (u, correct, a);
 		}
 
@@ -2499,13 +2851,14 @@ public:
                  * global history path. ??
                  */
 		shift_history(global_history, taken ^ !!(u->pc & 4));
-		shift_history(path_history, (u->pc >> path_bit) & 1);
+		shift_history(path_history, (u->pc >> path_bit) & 1);                
                 
 		if (local_table_size) {
-
+                  
                   // don't record into a local history if this branch has trivial behavior
                   
                   bool inhibit_local = never_taken || never_untaken;
+                  
                   if (!inhibit_local) {
                     local_histories[hash(u->pc,0)%local_num_histories] <<= 1;
                     local_histories[hash(u->pc,0)%local_num_histories] |= taken;
