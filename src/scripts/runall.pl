@@ -11,7 +11,8 @@ require ( "./bench_list.pl");
 #####################################
 
 $trace_dir = "../traces/";
-$filetype  = ".bt9.trace.gz";
+#$filetype  = ".bt9.trace.gz";
+$filetype  = ".bt9.trace";
 $wsuite    = "all"; 
 $sim_exe   = "../sim/predictor";
 $dest_dir  = "../results/MYRESULTS";
