@@ -44,12 +44,15 @@ def print_summary(path="/home/aakarsh/src/nnbp/src/results/MYRESULTS"):
 def compare_results(r1,r2):
     (trace_time_1,total_1) = summary(r1)
     (trace_time_2,total_2) = summary(r2)
-    
+    delta_results = {}
     for key in sorted(trace_time_1,key=trace_time_1.get,reverse=True):
         delta = 0
         if key in trace_time_2:
-            delta = trace_time_1[key] - trace_time_2[key]
-        print "%10s \t%+10f"% (key,delta)
+            delta_results[key] = trace_time_1[key] - trace_time_2[key]
+            
+    for key in sorted(delta_results,key=delta_results.get,reverse=True):
+        print "%10s \t%+10f"% (key,delta_results[key])
+        
         
 def grouper(n,iterable,fill_value = None):
     "Group iterable in groups of n  fill rest with fill_value "
