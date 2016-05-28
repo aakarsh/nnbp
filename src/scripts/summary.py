@@ -45,8 +45,8 @@ def print_summary(path="/home/aakarsh/src/nnbp/src/results/MYRESULTS"):
 
 
 def compare_results(r1,r2):
-    (trace_time_1,total_1) = summary(r1)
-    (trace_time_2,total_2) = summary(r2)
+    (trace_time_1,total_1,cnt_1) = summary(r1)
+    (trace_time_2,total_2,cnt_2) = summary(r2)
     delta_results = {}
     for key in sorted(trace_time_1,key=trace_time_1.get,reverse=True):
         delta = 0
