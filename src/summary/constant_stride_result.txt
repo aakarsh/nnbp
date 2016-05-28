@@ -1,3 +1,4 @@
+Using result directory ../results/constant_stride_results/ 
 43.183600 	SHORT_SERVER-56.res
 38.156200 	SHORT_SERVER-53.res
 37.743600 	SHORT_SERVER-57.res
@@ -114,4 +115,5 @@
 0.000200  	SHORT_MOBILE-26.res
 0.000000  	SHORT_MOBILE-33.res
 Total : 804.593400
+Average : 6.996464  
 

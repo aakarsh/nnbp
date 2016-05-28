@@ -128,4 +128,5 @@ Using result directory ../results/tage_sc_l_1024/
 0.000100  	SHORT_MOBILE-31.res
 0.000000  	SHORT_MOBILE-33.res
 Total : 661.909600
+Average : 5.171169  
 

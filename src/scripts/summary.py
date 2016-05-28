@@ -9,7 +9,8 @@ from itertools import izip_longest
 def summary(result_dir):
     file_list = glob.glob(result_dir+"/*.res")    
     trace_time = {}
-    total  = 0        
+    total  = 0
+    count = 0
     for f in file_list:
         filename = os.path.basename(f)
         fh = open(f)
@@ -27,18 +28,20 @@ def summary(result_dir):
         if "MISPRED_PER_1K_INST" in results and len(results) > 0:           
             trace_time[filename] = float(results["MISPRED_PER_1K_INST"])
             total += trace_time[filename]
+            count += 1
+            
         fh.close()
-    return (trace_time,total)
+    return (trace_time,total,count)
    
     
     
 def print_summary(path="/home/aakarsh/src/nnbp/src/results/MYRESULTS"):
-    " Print the summary of misprediction results  "
-    (trace_time,total) = summary(path)
+    "Print the summary of misprediction results "
+    (trace_time,total,count) = summary(path)
     for key in sorted(trace_time,key=trace_time.get,reverse=True):
         print "%-10f\t%s"%(trace_time[key],key)
         
-    print "Total : %-10f\n" % total
+    print "Total : %-10f\nAverage : %-10f\n" % (total,total/count)
 
 
 def compare_results(r1,r2):

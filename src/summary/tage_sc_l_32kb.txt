@@ -1,4 +1,4 @@
-Using result directory ../results/tage_sc_l/ 
+Using result directory ../results/tage_sc_l 
 37.665100 	SHORT_SERVER-56.res
 31.885700 	SHORT_SERVER-53.res
 31.600400 	SHORT_SERVER-57.res
@@ -89,8 +89,10 @@ Using result directory ../results/tage_sc_l/
 1.034800  	SHORT_SERVER-94.res
 1.013900  	SHORT_MOBILE-39.res
 0.942600  	SHORT_SERVER-87.res
+0.824100  	SHORT_MOBILE-21.res
 0.670500  	SHORT_MOBILE-61.res
 0.567500  	SHORT_SERVER-31.res
+0.515100  	SHORT_MOBILE-22.res
 0.505500  	SHORT_SERVER-95.res
 0.200000  	SHORT_MOBILE-30.res
 0.180900  	SHORT_MOBILE-18.res
@@ -125,5 +127,6 @@ Using result directory ../results/tage_sc_l/
 0.000200  	SHORT_MOBILE-26.res
 0.000100  	SHORT_MOBILE-31.res
 0.000000  	SHORT_MOBILE-33.res
-Total : 718.020800
+Total : 719.360000
+Average : 5.620000  
 
