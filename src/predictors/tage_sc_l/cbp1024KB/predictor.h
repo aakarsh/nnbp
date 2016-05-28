@@ -27,7 +27,7 @@
  * Hard coded value for the number of tag tables .
  */
 #ifndef REALISTIC
-#define NHIST 16
+#define NHIST 17
 #else
 #define NHIST 13
 #endif
@@ -35,13 +35,14 @@
 #define HYSTSHIFT 2 // bimodal hysteresis shared by 4 entries
 
 /**
- * Number of entries in bi-modal predictor = 2^LOGB = 16,384
+ * Number of entries in bi-modal predictor = 2^LOG_BIMODAL_NENTRIES = (* 2 16384)
+ * Base predictor  PC indexed 2-bit counter bi-modal table
  */
-#define LOGB 14 // log of number of entries in bimodal predictor
+#define LOG_BIMODAL_NENTRIES 17 // log of number of entries in bimodal predictor
 
 
 
-#define PERCWIDTH 6 //Statistical coorector maximum counter width
+#define PERCWIDTH 8 //Statistical coorector maximum counter width
 
 //The statistical corrector components
 
@@ -79,6 +80,7 @@ long long L_shist[NLOCAL];
 // small local history
 #define LOGSNB 9
 #define SNB 4
+
 int Sm[SNB] =  {16,11, 6, 3};
 int8_t SGEHLA[SNB][(1 << LOGSNB)];
 int8_t *SGEHL[SNB];
@@ -112,9 +114,9 @@ int pthstack;
 //parameters of the loop predictor
 
 /** Size of loop predictor in use */
-#define LOGL 5
-#define WIDTHNBITERLOOP 10	// we predict only loops with less than 1K iterations
-#define LOOPTAG 10		//tag width in the loop predictor
+#define LOG_LOOP_PRED_NENTRIES 9
+#define WIDTHNBITERLOOP 12	// we predict only loops with less than 1K iterations
+#define LOOPTAG 17		//tag width in the loop predictor
 
 
 //update threshold for the statistical corrector
@@ -133,7 +135,7 @@ int8_t  ThirdH;
 
 #define CONFWIDTH 7	//for the counters in the choser
 
-#define PHISTWIDTH 27		// Width of the path history used in TAGE
+#define PHISTWIDTH 32		// Width of the path history used in TAGE
 
 /**
  * Useful counter are incremented whenever the prediction was correct
@@ -143,7 +145,7 @@ int8_t  ThirdH;
 
 #define CWIDTH 3   // predictor counter width on the TAGE tagged tables
 
-#define HISTBUFFERLENGTH 4096	// we use a 4K entries history buffer to store the branch history
+#define HISTBUFFERLENGTH 8192	// we use a 4K entries history buffer to store the branch history
 
 
 //the counter(s) to chose between longest match and alternate prediction on TAGE when weak counters
@@ -151,19 +153,18 @@ int8_t  ThirdH;
 #ifdef REALISTIC
 #define LOGSIZEUSEALT 0
 #else
-#define LOGSIZEUSEALT 8
+#define LOGSIZEUSEALT 10
 #endif
 #define SIZEUSEALT  (1<<(LOGSIZEUSEALT))
 #define INDUSEALT (PC & (SIZEUSEALT -1))
-int8_t use_alt_on_na[SIZEUSEALT][2];
 
+int8_t use_alt_on_na[SIZEUSEALT][2];
 
 
 long long GHIST;
 
-
 //The two BIAS tables in the SC component
-#define LOGBIAS 7
+#define LOGBIAS 13
 int8_t Bias[(1<<(LOGBIAS+1))];
 #define INDBIAS (((PC<<1) + pred_inter) & ((1<<(LOGBIAS+1)) -1))
 int8_t BiasSK[(1<<(LOGBIAS+1))];
@@ -222,8 +223,10 @@ public:
 
 #ifdef LOOPPREDICTOR
 
-//loop predictor entry
 
+/**
+//loop predictor entry
+ */
 class lentry {
 public:
   uint16_t NbIter;		// 10 bits  - iteration count
@@ -318,9 +321,15 @@ folded_history ch_i[NHIST + 1];
 folded_history ch_t[2][NHIST + 1];
 
 // For the TAGE predictor
-bentry *btable;			// bimodal TAGE table
-gentry *gtable[NHIST + 1];	// Tagged TAGE tables
+/**
+ * bimodal TAGE table
+ */
+bentry *btable;
 
+/**
+ * Tagged TAGE tables
+ */
+gentry *gtable[NHIST + 1];	
 
 
 #ifdef REALISTIC
@@ -328,34 +337,37 @@ gentry *gtable[NHIST + 1];	// Tagged TAGE tables
 /**
  * History lengths for different tables.
  */
-int history_lengths[NHIST+1]={0,8,12,18,27,40,60,90,135,203,305,459,690,690};
+int history_lengths[NHIST+1]={0,8,12,18,27,40,60,90,135,203,305,459,690,890,1024};
+
 
 /**
  * Tag width for different tables
  */
-int tag_width[NHIST + 1]  ={0,8, 9, 9,10,10,11,11,12,12,13,13,14,14};
+int tag_width[NHIST + 1]  ={0,8, 9, 9,10,10,11,11,12,12,13,13,15,16,16};
 
 /**
  * Log of number of entries in different tables
  */
-int log_nentry_tables[NHIST + 1]={0,10,10,10,10,10,10,10,10,10,10,10,10,10};
+int log_nentry_tables[NHIST + 1]={0,32,32,32,32,32,32,32,32,32,32,32,32,32,64};
 
 #else
 
 /**
  * History lenghts for different tag tables.
  */
-int history_lengths[NHIST+1]={0,6,10,18,25,35,55,69,105,155,230,354,479,642,1012,1347,1347};
+int history_lengths[NHIST+1]={0,7,13,18,25,35,55,69,105,155,230,354,479,642,1012,1347,1347,2048};
 
 /**
  * Width of tags for different tables
  */
-int tag_width[NHIST + 1]={0,7,9,9,9,10,11,11,12,12,12,13,14,15,15,15,15};
+int tag_width[NHIST + 1]={3,12,12,13,13,13,14,14,15,15,15,16,17,19,19,19,19,22 };
+
+
 
 /**
  * Log of number of entries in different tables
  */
-int log_nentry_tables[NHIST + 1]={0,10,10,10,11,10,10,10,10,10,9,9,9,8,7,7,7};
+int log_nentry_tables[NHIST + 1]={0,11,11,11,10,10,10,12,12,12,9,9,9,8,7,7,7,10};
 
 #endif
 
@@ -386,7 +398,8 @@ bool tage_pred;			// TAGE prediction
 bool LongestMatchPred;
 
 /**
- * Contains the bank number for the longest bank where with matching history.
+ * Contains the bank number for the longest bank where with matching
+ * history.
  */
 int HitBank;
 
@@ -402,8 +415,6 @@ bool pred_inter;
 
 
 #ifdef LOOPPREDICTOR
-/**
- */
 lentry *ltable;			//loop predictor table
 //variables for the loop predictor
 bool predloop;			// loop predictor prediction
@@ -485,19 +496,20 @@ int predictor_size () {
   int storage_size = 0;
 
   storage_size += tage_table_size_all();
+  fprintf(stderr, "%d\n",SIZEUSEALT);
   storage_size += 2 * (SIZEUSEALT) * 4;
-  storage_size += (1 << LOGB) + (1 << (LOGB - HYSTSHIFT));
+  storage_size += (1 << LOG_BIMODAL_NENTRIES ) + (1 << (LOG_BIMODAL_NENTRIES - HYSTSHIFT));
   storage_size += max_history_length();
   storage_size += PHISTWIDTH;
   storage_size += 10 ; // the TICK counter
 
-  fprintf(stderr, "(TAGE %d)\n", storage_size);
+  fprintf(stderr, "(TAGE %d bytes)\n", storage_size);
 
   // No idea how the loop predictor is supposed to work.
   int inter = 0;
 
 #ifdef LOOPPREDICTOR
-  inter = (1 << LOGL) * (2 * WIDTHNBITERLOOP + LOOPTAG + 4 + 4 + 1);
+  inter = (1 << LOG_LOOP_PRED_NENTRIES) * (2 * WIDTHNBITERLOOP + LOOPTAG + 4 + 4 + 1);
   fprintf (stderr, "(LOOP %d)\n", inter);
   storage_size += inter;
 #endif
@@ -518,7 +530,7 @@ int predictor_size () {
 #endif
 
   inter += NLOCAL * Lm[0];
-  inter += 3*CONFWIDTH;    // the 3 counters in the choser
+  inter += 3 * CONFWIDTH;    // the 3 counters in the choser
 
   storage_size += inter;
 
@@ -550,20 +562,21 @@ public:
 
     // hate this way of programming
 #ifdef LOOPPREDICTOR
-    ltable = new lentry[1 << (LOGL)];
+    ltable = new lentry[1 << (LOG_LOOP_PRED_NENTRIES)];
 #endif
 
     /**
-     * For each history length
+     * For each history length create a nentries
+     * (table_i) =   2^log_nentry_tables[i]
      */
     for (int i = 1; i <= NHIST; i++) {
       gtable[i] = new gentry[1 << (log_nentry_tables[i])];
     }
 
     /**
-     * Initialized the bimodal table with 2^LOGB entries
+     * Initialized the bimodal table with 2^LOG_BIMODAL_NENTRIES entries
      */
-    btable = new bentry[1 << LOGB];
+    btable = new bentry[1 << LOG_BIMODAL_NENTRIES ];
 
     for (int i = 1; i <= NHIST; i++) {
 
@@ -641,10 +654,10 @@ for (int i = 0; i < SNB; i++)
 #endif
 
     /**
-     * Initialize the base bi-modal table with 2^LOGB entries with
-     * hysteresis 1 and prediction 0
+     * Initialize the base bi-modal table with 2^LOG_BIMODAL_NENTRIES
+     * entries with hysteresis 1 and prediction 0
      */
-    for (int i = 0; i < (1 << LOGB); i++)
+    for (int i = 0; i < (1 << LOG_BIMODAL_NENTRIES ); i++)
       {
 	btable[i].pred = 0;
 	btable[i].hyst = 1;
@@ -670,6 +683,9 @@ for (int i = 0; i < SNB; i++)
 
     GHIST = 0;
 
+    /**
+     * Aternate predictors initialized to zero
+     */
     for (int i = 0; i < SIZEUSEALT; i++) {
 	use_alt_on_na[i][0] = 0;
 	use_alt_on_na[i][1] = 0;
@@ -684,13 +700,13 @@ for (int i = 0; i < SNB; i++)
 
 
   /**
-   * Simply select the last LOGB number of bits of PC
+   * Simply select the last LOG_BIMODAL_NENTRIES number of bits of PC
    * - index function for the bimodal table
    */
 
   int bindex(uint32_t PC)
   {
-    return ((PC) & ((1 << (LOGB)) - 1));
+    return ((PC) & ((1 << (LOG_BIMODAL_NENTRIES )) - 1));
   }
 
 
@@ -772,7 +788,7 @@ for (int i = 0; i < SNB; i++)
       }
   }
 
-
+    
 #ifdef LOOPPREDICTOR
 
   /**
@@ -781,7 +797,7 @@ for (int i = 0; i < SNB; i++)
   int lindex (uint32_t PC)
   {
     // LOGL - Size of loop predictor
-    return ((PC & ((1 << (LOGL - 2)) - 1)) << 2);
+    return ((PC & ((1 << (LOG_LOOP_PRED_NENTRIES - 2)) - 1)) << 2);
   }
 
 
@@ -796,7 +812,7 @@ for (int i = 0; i < SNB; i++)
    */
   static inline int compute_loop_tag(uint32_t PC)
   {
-    int pc_loop_tag = (PC >> (LOGL - 2)) & ((1 << 2 * LOOPTAG) - 1);
+    int pc_loop_tag = (PC >> (LOG_LOOP_PRED_NENTRIES - 2)) & ((1 << 2 * LOOPTAG) - 1);
     pc_loop_tag ^= (pc_loop_tag >> LOOPTAG);
     pc_loop_tag = (pc_loop_tag & ((1 << LOOPTAG) - 1));
     return pc_loop_tag;
@@ -810,7 +826,7 @@ for (int i = 0; i < SNB; i++)
 
     LHIT = -1;     // hitting way in the predictor
     LI = lindex (PC);
-    LIB  = ((PC >> (LOGL - 2)) & ((1 << (LOGL - 2)) - 1));
+    LIB  = ((PC >> (LOG_LOOP_PRED_NENTRIES - 2)) & ((1 << (LOG_LOOP_PRED_NENTRIES - 2)) - 1));
     LTAG = compute_loop_tag(PC);
 
     // Checking inside of a four way associative index - i is the block
@@ -958,6 +974,9 @@ for (int i = 0; i < SNB; i++)
   }
 #endif
 
+  /**
+   * Returns the prediction from bimodal table
+   */
   bool getbim ()
   {
     BIM = (btable[BI].pred << 1) + (btable[BI >> HYSTSHIFT].hyst);
@@ -1011,9 +1030,9 @@ for (int i = 0; i < SNB; i++)
     }
 
     /**
-     * Index into bi-modal table is simple last LOGB bits of PC
+     * Index into bi-modal table is simple last LOG_BIMODAL_NENTRIES bits of PC
      */
-    BI = PC & ((1 << LOGB) - 1);
+    BI = PC & ((1 << LOG_BIMODAL_NENTRIES ) - 1);
 
 
     //Look for the bank with longest matching history
@@ -1092,8 +1111,9 @@ for (int i = 0; i < SNB; i++)
   /**
    * Prints the prediction for given program counter.
    */
-  bool GetPrediction(UINT64 PC, bool btbANSF, bool btbATSF, bool btbDYN) {
-    // computes the TAGE table addresses and the partial tags
+  bool GetPrediction(UINT64 PC, bool btbANSF, bool btbATSF, bool btbDYN) 
+  {
+    // Computes the TAGE table addresses and the partial tags
 
     Tagepred(PC);
     pred_taken = tage_pred;
@@ -1119,7 +1139,7 @@ for (int i = 0; i < SNB; i++)
     if (!pred_inter)
       LSUM = -LSUM;
 
-//integrate BIAS prediction
+    //integrate BIAS prediction
     int8_t ctr = Bias[INDBIAS];
     LSUM += (2 * ctr + 1);
     ctr = BiasSK[INDBIASSK];
@@ -1151,7 +1171,6 @@ for (int i = 0; i < SNB; i++)
 	      pred_taken = (ThirdH < 0) ? SCPRED : pred_inter;
           }
       }
-
 
     return pred_taken;
   }
@@ -1229,7 +1248,7 @@ for (int i = 0; i < SNB; i++)
 
 // PREDICTOR UPDATE
 
-  void    UpdatePredictor(UINT64 PC, OpType opType, bool resolveDir, bool predDir, UINT64 branchTarget, bool btbANSF, bool btbATSF, bool btbDYN)
+  void UpdatePredictor(UINT64 PC, OpType opType, bool resolveDir, bool predDir, UINT64 branchTarget, bool btbANSF, bool btbATSF, bool btbDYN)
   {
 
 #ifdef LOOPPREDICTOR
