@@ -55,6 +55,7 @@ PROGRAMS := predictor
 objects = predictor.o main.o
 
 all:
+	$(MAKE) -d BUDGET=cbp1024KB PREDICTOR=tage_sc_l predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=perceptron VERBOSE=1 predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=gshare predictor
 #       $(MAKE) -d BUDGET=cbp32KB PREDICTOR=bias_free_neural predictor
@@ -63,7 +64,7 @@ all:
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=poTageColt predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=poTageSc predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=t_bag predictor
-	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=tage_sc_l predictor
+
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=temporal_stream predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=wormhole  predictor
 
