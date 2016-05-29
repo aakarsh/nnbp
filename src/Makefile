@@ -55,7 +55,8 @@ PROGRAMS := predictor
 objects = predictor.o main.o
 
 all:
-	$(MAKE) -d BUDGET=cbp1024KB PREDICTOR=tage_sc_l predictor
+#	$(MAKE) -d BUDGET=cbp1024KB PREDICTOR=tage_sc_l predictor
+	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=tage_sc_l_percep predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=perceptron VERBOSE=1 predictor
 #	$(MAKE) -d BUDGET=cbp32KB PREDICTOR=gshare predictor
 #       $(MAKE) -d BUDGET=cbp32KB PREDICTOR=bias_free_neural predictor
