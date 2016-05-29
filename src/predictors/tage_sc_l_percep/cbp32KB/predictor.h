@@ -738,7 +738,7 @@ public:
 
           *index = *index * 2 + partial_index;
 
-          fprintf(stderr,"\ncompute_partial_index pc:%10x index:%10u  history:%10d hash-which:%d  [%4d-%4d,%4d]\n",pc,*index,kind,which,start,end,stride);
+          //fprintf(stderr,"\ncompute_partial_index pc:%10x index:%10u  history:%10d hash-which:%d  [%4d-%4d,%4d]\n",pc,*index,kind,which,start,end,stride);
           
 	}
 
@@ -748,7 +748,7 @@ public:
          * sets perceptron u->indices[t] = to index in the table
          */
 	void finish_index (unsigned int *index, int this_table, sampler_info *u) {
-          fprintf(stderr,"\nfinish_index[Entry]: Table:%-5d Index %-5u  Sum:%5d\n",this_table,*index,u->sum);
+          //fprintf(stderr,"\nfinish_index[Entry]: Table:%-5d Index %-5u  Sum:%5d\n",this_table,*index,u->sum);
           /* modulo the computed index by the table size */
           *index %= table_size;
           
@@ -760,7 +760,7 @@ public:
           if(this_table == 0)
             fprintf(stderr,"\n");
           
-          fprintf(stderr,"finish_index: Table:%-5d Index %-5u Weight:%5d Sum:%5d\n",this_table,*index,x,u->sum);
+          //fprintf(stderr,"finish_index: Table:%-5d Index %-5u Weight:%5d Sum:%5d\n",this_table,*index,x,u->sum);
           
           u->weighted_sum += pow (coeff_base, coeffs[this_table]) * x;
           u->indices[this_table] = *index;
@@ -2436,10 +2436,10 @@ public:
 		}
 	}
 
+        /**
+         * Using results of learning for variable strides
+         */
 	double compute_indices (unsigned int pc, sampler_info *u) {
-          fprintf(stderr,"compute_indices: %x",pc);
-          return compute_indices_0(pc,u);
-          /**
 		switch (signature) {
 		case 0x40591c: return compute_indices_0 (pc, u);
 		case 0x415aa4: return compute_indices_1 (pc, u);
@@ -2483,7 +2483,6 @@ public:
 		case 0x404ba9: return compute_indices_39 (pc, u);
 		default: return compute_indices_40 (pc, u);
 		}
-          */
 	}
 
 
@@ -2600,13 +2599,13 @@ public:
              * so far never switched in behavior
              */
             if (filter[0][idx]) {
-              fprintf(stderr,"Trivial False: %x\n",pc);
+              //fprintf(stderr,"Trivial False: %x\n",pc);
               u->prediction (false);
               u->weighted_sum = min_weight;
               u->sum = min_weight;
               
             } else if (filter[1][idx]) { 
-              fprintf(stderr,"Trivial True: %x\n",pc);
+              //fprintf(stderr,"Trivial True: %x\n",pc);
               u->prediction (true);
               u->weighted_sum = max_weight;
               u->sum = max_weight;
@@ -2621,7 +2620,7 @@ public:
             
             // it's in both filters; have to predict it with
             // perceptron predictor
-            fprintf(stderr,"Perceptron Predict: %x\n",pc);
+            //fprintf(stderr,"Perceptron Predict: %x\n",pc);
             compute_sums (pc, u);
           }
           
